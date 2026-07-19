@@ -1,0 +1,100 @@
+@baseUrl = http://localhost:5216
+
+### ========== 0. 健康检查（先确认服务已启动）==========
+GET {{baseUrl}}/api/health
+
+### ========== 1. 主数据查询（看演示数据 ID）==========
+
+# 车间列表 → 演示数据 WorkshopId = 1
+GET {{baseUrl}}/api/master/workshops
+
+# 员工列表 → 演示数据 EmployeeId = 1(张三) 或 2(李四)
+GET {{baseUrl}}/api/master/employees?workshopId=1
+
+# 产品列表 → 演示数据 ProductId = 1(轴承座) 或 2(法兰盘)
+GET {{baseUrl}}/api/master/products
+
+# 扫码查产品（模拟小程序扫二维码）
+GET {{baseUrl}}/api/master/products/by-qrcode?code=PROD:P001
+
+# 设备列表 → 演示数据 EquipmentId = 1
+GET {{baseUrl}}/api/master/equipments?workshopId=1
+
+# 扫码查设备
+GET {{baseUrl}}/api/master/equipments/by-qrcode?code=EQ:CNC-01
+
+### ========== 2. 扫码报工（核心流程）==========
+
+# 提交一条报工记录
+POST {{baseUrl}}/api/work-reports/scan
+Content-Type: application/json
+
+{
+  "productId": 1,
+  "workshopId": 1,
+  "employeeId": 1,
+  "equipmentId": 1,
+  "quantity": 100,
+  "qualifiedQty": 98,
+  "defectQty": 2,
+  "scanPayload": "PROD:P001",
+  "remark": "早班报工测试"
+}
+
+# 查询今天的报工列表
+GET {{baseUrl}}/api/work-reports?workshopId=1
+
+### ========== 3. 产量统计 ==========
+
+# 日统计（不传 date 则统计今天）
+GET {{baseUrl}}/api/stats/production/daily?workshopId=1
+
+# 周统计（year=2026, week=29 请按实际周数改）
+GET {{baseUrl}}/api/stats/production/weekly?year=2026&week=29&workshopId=1
+
+# 月统计
+GET {{baseUrl}}/api/stats/production/monthly?year=2026&month=7&workshopId=1
+
+### ========== 4. 质量追踪 ==========
+
+# 录入一条质检记录
+POST {{baseUrl}}/api/quality
+Content-Type: application/json
+
+{
+  "productId": 1,
+  "workshopId": 1,
+  "inspectorId": 2,
+  "sampleQty": 50,
+  "qualifiedQty": 49,
+  "defectQty": 1,
+  "defectType": "表面划伤",
+  "remark": "抽检测试"
+}
+
+# 质量日统计
+GET {{baseUrl}}/api/quality/stats/daily?workshopId=1
+
+# 质量月统计
+GET {{baseUrl}}/api/quality/stats/monthly?year=2026&month=7&workshopId=1
+
+### ========== 5. 设备保养 ==========
+
+# 生成保养提醒（演示数据里已有计划，应能生成 1 条）
+POST {{baseUrl}}/api/maintenance/reminders/generate
+
+# 查看待处理提醒
+GET {{baseUrl}}/api/maintenance/reminders/pending?workshopId=1
+
+# 新增保养计划（可选）
+POST {{baseUrl}}/api/maintenance/plans
+Content-Type: application/json
+
+{
+  "equipmentId": 1,
+  "planName": "季度大保养",
+  "cycleDays": 90,
+  "nextDueDate": "2026-10-01T00:00:00Z",
+  "remindDaysBefore": 7,
+  "content": "更换滤芯、校准主轴"
+}
