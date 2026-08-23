@@ -7,6 +7,11 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# 确保 dotnet 命令可用（本机安装于 /usr/local/share/dotnet）
+if ! command -v dotnet >/dev/null 2>&1 && [ -x /usr/local/share/dotnet/dotnet ]; then
+  export PATH="/usr/local/share/dotnet:$PATH"
+fi
+
 # 把 NuGet 缓存放到项目目录，绕过 ~/.local/share 权限问题
 export XDG_DATA_HOME="$PROJECT_ROOT/.xdg"
 export NUGET_PACKAGES="$PROJECT_ROOT/.nuget/packages"

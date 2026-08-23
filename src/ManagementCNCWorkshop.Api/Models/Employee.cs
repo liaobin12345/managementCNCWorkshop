@@ -1,6 +1,6 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
-/// <summary>员工（操作工、质检员等，预留微信登录）</summary>
+/// <summary>员工（操作工、质检员、管理员，预留微信登录）</summary>
 public class Employee
 {
     /// <summary>主键 ID</summary>
@@ -18,7 +18,13 @@ public class Employee
     /// <summary>所属车间 ID</summary>
     public int WorkshopId { get; set; }
 
-    /// <summary>微信小程序 OpenId（登录后绑定，V1 暂未启用）</summary>
+    /// <summary>角色：Admin 管理员 / Worker 操作工 / Inspector 质检员</summary>
+    public string Role { get; set; } = "Worker";
+
+    /// <summary>登录密码哈希（PBKDF2），V1 演示账号，生产环境请接入微信登录</summary>
+    public string PasswordHash { get; set; } = string.Empty;
+
+    /// <summary>微信小程序 OpenId（微信登录后绑定）</summary>
     public string? WeChatOpenId { get; set; }
 
     /// <summary>创建时间</summary>

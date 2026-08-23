@@ -1,20 +1,26 @@
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
 using ManagementCNCWorkshop.Api.Models.Dtos;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace ManagementCNCWorkshop.Api.Controllers;
+namespace ManagementCNCWorkshop.Api.Controllers.Admin;
 
-/// <summary>设备保养：保养计划、到期提醒</summary>
+/// <summary>运营后台设备保养：计划维护、提醒生成与查询</summary>
 [ApiController]
-[Route("api/maintenance")]
-[Tags("设备保养")]
-public class MaintenanceController(AppDbContext db) : ControllerBase
+[Route("api/admin/maintenance")]
+[Authorize(Roles = "Admin")]
+[Tags("运营后台-保养")]
+public class AdminMaintenanceController(AppDbContext db) : ControllerBase
 {
+    /// <summary>保养计划列表</summary>
+    [HttpGet("plans")]
+    [ProducesResponseType(typeof(List<MaintenancePlan>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Plans() =>
+        Ok(await db.MaintenancePlans.Include(x => x.Equipment).OrderBy(x => x.NextDueDate).ToListAsync());
+
     /// <summary>创建保养计划</summary>
-    /// <param name="plan">保养计划（EquipmentId、PlanName、CycleDays、NextDueDate 必填）</param>
-    /// <returns>保存后的保养计划</returns>
     [HttpPost("plans")]
     [ProducesResponseType(typeof(MaintenancePlan), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreatePlan([FromBody] MaintenancePlan plan)
@@ -24,10 +30,7 @@ public class MaintenanceController(AppDbContext db) : ControllerBase
         return Ok(plan);
     }
 
-    /// <summary>查询待处理保养提醒</summary>
-    /// <remarks>返回状态为 Pending（待处理）或 Overdue（已逾期）的提醒，按截止日期升序排列。</remarks>
-    /// <param name="workshopId">按车间筛选（可选）</param>
-    /// <returns>保养提醒列表（含关联的设备和计划信息）</returns>
+    /// <summary>查询待处理保养提醒（Pending / Overdue）</summary>
     [HttpGet("reminders/pending")]
     [ProducesResponseType(typeof(List<MaintenanceReminder>), StatusCodes.Status200OK)]
     public async Task<IActionResult> PendingReminders([FromQuery] int? workshopId)
@@ -44,12 +47,6 @@ public class MaintenanceController(AppDbContext db) : ControllerBase
     }
 
     /// <summary>根据保养计划自动生成提醒</summary>
-    /// <remarks>
-    /// 扫描所有保养计划，若当前日期已到提醒日（NextDueDate - RemindDaysBefore），
-    /// 且该计划对应提醒尚未生成，则创建一条 MaintenanceReminder。
-    /// 建议后续用定时任务每天调用一次；小程序也可手动触发。
-    /// </remarks>
-    /// <returns>本次新生成的提醒条数</returns>
     [HttpPost("reminders/generate")]
     [ProducesResponseType(typeof(GenerateRemindersResult), StatusCodes.Status200OK)]
     public async Task<IActionResult> GenerateReminders()

@@ -41,6 +41,9 @@ Thumbs.db
 .xdg/
 .dotnet-cli/
 
+## Local runtimes
+.tools/
+
 ## App
 appsettings.*.local.json
 *.db

@@ -1,4 +1,5 @@
 using ManagementCNCWorkshop.Api.Models;
+using ManagementCNCWorkshop.Api.Services;
 
 namespace ManagementCNCWorkshop.Api.Data;
 
@@ -14,8 +15,30 @@ public static class DbSeed
         db.SaveChanges();
 
         db.Employees.AddRange(
-            new Employee { EmployeeNo = "E001", Name = "张三", Phone = "13800000001", WorkshopId = workshop.Id },
-            new Employee { EmployeeNo = "E002", Name = "李四", Phone = "13800000002", WorkshopId = workshop.Id }
+            new Employee
+            {
+                EmployeeNo = "E001", Name = "张三", Phone = "13800000001",
+                WorkshopId = workshop.Id, Role = "Worker",
+                PasswordHash = PasswordHasher.Hash("123456")
+            },
+            new Employee
+            {
+                EmployeeNo = "E002", Name = "李四", Phone = "13800000002",
+                WorkshopId = workshop.Id, Role = "Worker",
+                PasswordHash = PasswordHasher.Hash("123456")
+            },
+            new Employee
+            {
+                EmployeeNo = "E003", Name = "王五", Phone = "13800000003",
+                WorkshopId = workshop.Id, Role = "Inspector",
+                PasswordHash = PasswordHasher.Hash("123456")
+            },
+            new Employee
+            {
+                EmployeeNo = "E900", Name = "管理员", Phone = "13800000099",
+                WorkshopId = workshop.Id, Role = "Admin",
+                PasswordHash = PasswordHasher.Hash("admin123")
+            }
         );
 
         db.Products.AddRange(
@@ -47,6 +70,7 @@ public static class DbSeed
 
         db.SaveChanges();
 
-        Console.WriteLine("[演示数据] 可用 ID：Workshop=1, Employee=1/2, Product=1/2, Equipment=1");
+        Console.WriteLine("[演示数据] 账号：管理员 E900/admin123，工人 E001~E002/123456，质检员 E003/123456");
+        Console.WriteLine("[演示数据] 可用 ID：Workshop=1, Employee=1/2/3/4, Product=1/2, Equipment=1");
     }
 }

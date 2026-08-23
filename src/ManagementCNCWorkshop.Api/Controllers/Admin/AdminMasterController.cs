@@ -1,18 +1,20 @@
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
+using ManagementCNCWorkshop.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace ManagementCNCWorkshop.Api.Controllers;
+namespace ManagementCNCWorkshop.Api.Controllers.Admin;
 
-/// <summary>基础主数据：车间、员工、产品、设备的维护与扫码查询</summary>
+/// <summary>运营后台主数据：车间、员工、产品、设备的维护</summary>
 [ApiController]
-[Route("api/master")]
-[Tags("主数据")]
-public class MasterDataController(AppDbContext db) : ControllerBase
+[Route("api/admin/master")]
+[Authorize(Roles = "Admin")]
+[Tags("运营后台-主数据")]
+public class AdminMasterController(AppDbContext db) : ControllerBase
 {
-    /// <summary>获取当前数据库中的主数据 ID（测试接口时用）</summary>
-    /// <remarks>Swagger 测试前先看这里，用返回的真实 Id，不要猜。</remarks>
+    /// <summary>获取当前数据库中的主数据 ID（测试/联调用）</summary>
     [HttpGet("demo-info")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DemoInfo()
@@ -20,49 +22,55 @@ public class MasterDataController(AppDbContext db) : ControllerBase
         return Ok(new
         {
             workshops = await db.Workshops.Select(x => new { x.Id, x.Code, x.Name }).ToListAsync(),
-            employees = await db.Employees.Select(x => new { x.Id, x.EmployeeNo, x.Name, x.WorkshopId }).ToListAsync(),
+            employees = await db.Employees.Select(x => new { x.Id, x.EmployeeNo, x.Name, x.Role, x.WorkshopId }).ToListAsync(),
             products = await db.Products.Select(x => new { x.Id, x.Code, x.Name, x.QrCode }).ToListAsync(),
-            equipments = await db.Equipments.Select(x => new { x.Id, x.Code, x.Name, x.QrCode, x.WorkshopId }).ToListAsync(),
-            tip = "报工示例：productId/products.id, workshopId/workshops.id, employeeId/employees.id, equipmentId 可选"
+            equipments = await db.Equipments.Select(x => new { x.Id, x.Code, x.Name, x.QrCode, x.WorkshopId }).ToListAsync()
         });
     }
 
     /// <summary>获取车间列表</summary>
-    /// <returns>全部车间，按编码排序</returns>
     [HttpGet("workshops")]
     [ProducesResponseType(typeof(List<Workshop>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Workshops() =>
         Ok(await db.Workshops.OrderBy(x => x.Code).ToListAsync());
 
     /// <summary>新增车间</summary>
-    /// <param name="workshop">车间信息（Code、Name 必填）</param>
     [HttpPost("workshops")]
     [ProducesResponseType(typeof(Workshop), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateWorkshop([FromBody] Workshop workshop)
     {
+        if (await db.Workshops.AnyAsync(x => x.Code == workshop.Code))
+            return BadRequest(new { message = $"车间编码 {workshop.Code} 已存在" });
+
         db.Workshops.Add(workshop);
         await db.SaveChangesAsync();
         return Ok(workshop);
     }
 
     /// <summary>获取员工列表</summary>
-    /// <param name="workshopId">按车间筛选（可选）</param>
     [HttpGet("employees")]
     [ProducesResponseType(typeof(List<Employee>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Employees([FromQuery] int? workshopId)
+    public async Task<IActionResult> Employees([FromQuery] int? workshopId, [FromQuery] string? role)
     {
         var q = db.Employees.Include(x => x.Workshop).AsQueryable();
         if (workshopId.HasValue)
             q = q.Where(x => x.WorkshopId == workshopId);
+        if (!string.IsNullOrEmpty(role))
+            q = q.Where(x => x.Role == role);
         return Ok(await q.OrderBy(x => x.EmployeeNo).ToListAsync());
     }
 
-    /// <summary>新增员工</summary>
-    /// <param name="employee">员工信息（EmployeeNo、Name、WorkshopId 必填）</param>
+    /// <summary>新增员工（工号唯一，默认密码 123456）</summary>
     [HttpPost("employees")]
     [ProducesResponseType(typeof(Employee), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateEmployee([FromBody] Employee employee)
     {
+        if (await db.Employees.AnyAsync(x => x.EmployeeNo == employee.EmployeeNo))
+            return BadRequest(new { message = $"工号 {employee.EmployeeNo} 已存在" });
+
+        if (string.IsNullOrEmpty(employee.PasswordHash))
+            employee.PasswordHash = PasswordHasher.Hash("123456");
+
         db.Employees.Add(employee);
         await db.SaveChangesAsync();
         return Ok(employee);
@@ -75,19 +83,19 @@ public class MasterDataController(AppDbContext db) : ControllerBase
         Ok(await db.Products.OrderBy(x => x.Code).ToListAsync());
 
     /// <summary>新增产品</summary>
-    /// <param name="product">产品信息（Code、Name 必填，QrCode 用于扫码匹配）</param>
     [HttpPost("products")]
     [ProducesResponseType(typeof(Product), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateProduct([FromBody] Product product)
     {
+        if (await db.Products.AnyAsync(x => x.Code == product.Code))
+            return BadRequest(new { message = $"产品编码 {product.Code} 已存在" });
+
         db.Products.Add(product);
         await db.SaveChangesAsync();
         return Ok(product);
     }
 
     /// <summary>扫码查询产品</summary>
-    /// <param name="code">二维码内容，如 PROD:P001</param>
-    /// <returns>匹配的产品信息，未找到返回 404</returns>
     [HttpGet("products/by-qrcode")]
     [ProducesResponseType(typeof(Product), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -98,7 +106,6 @@ public class MasterDataController(AppDbContext db) : ControllerBase
     }
 
     /// <summary>获取设备列表</summary>
-    /// <param name="workshopId">按车间筛选（可选）</param>
     [HttpGet("equipments")]
     [ProducesResponseType(typeof(List<Equipment>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Equipments([FromQuery] int? workshopId)
@@ -110,19 +117,21 @@ public class MasterDataController(AppDbContext db) : ControllerBase
     }
 
     /// <summary>新增设备</summary>
-    /// <param name="equipment">设备信息（Code、Name、WorkshopId 必填）</param>
     [HttpPost("equipments")]
     [ProducesResponseType(typeof(Equipment), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateEquipment([FromBody] Equipment equipment)
     {
+        if (await db.Equipments.AnyAsync(x => x.Code == equipment.Code))
+            return BadRequest(new { message = $"设备编码 {equipment.Code} 已存在" });
+        if (equipment.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == equipment.WorkshopId))
+            return BadRequest(new { message = "所选车间不存在" });
+
         db.Equipments.Add(equipment);
         await db.SaveChangesAsync();
         return Ok(equipment);
     }
 
     /// <summary>扫码查询设备</summary>
-    /// <param name="code">二维码内容，如 EQ:CNC-01</param>
-    /// <returns>匹配的设备信息，未找到返回 404</returns>
     [HttpGet("equipments/by-qrcode")]
     [ProducesResponseType(typeof(Equipment), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -10,16 +10,16 @@ public static class ReferenceValidator
         AppDbContext db, int productId, int workshopId, int employeeId, int? equipmentId)
     {
         if (!await db.Products.AnyAsync(x => x.Id == productId))
-            return $"产品 ID {productId} 不存在，请先调用 GET /api/master/products 查看可用 ID";
+            return $"产品 ID {productId} 不存在，请先调用 GET /api/admin/master/products 查看可用 ID";
 
         if (!await db.Workshops.AnyAsync(x => x.Id == workshopId))
-            return $"车间 ID {workshopId} 不存在，请先调用 GET /api/master/workshops 查看可用 ID";
+            return $"车间 ID {workshopId} 不存在，请先调用 GET /api/admin/master/workshops 查看可用 ID";
 
         if (!await db.Employees.AnyAsync(x => x.Id == employeeId))
-            return $"员工 ID {employeeId} 不存在，请先调用 GET /api/master/employees 查看可用 ID";
+            return $"员工 ID {employeeId} 不存在，请先调用 GET /api/admin/master/employees 查看可用 ID";
 
         if (equipmentId.HasValue && !await db.Equipments.AnyAsync(x => x.Id == equipmentId))
-            return $"设备 ID {equipmentId} 不存在，请先调用 GET /api/master/equipments 查看可用 ID，或不传 equipmentId";
+            return $"设备 ID {equipmentId} 不存在，请先调用 GET /api/admin/master/equipments 查看可用 ID，或不传 equipmentId";
 
         return null;
     }
