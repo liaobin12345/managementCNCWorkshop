@@ -12,7 +12,7 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 /// <summary>工人端扫码报工：提交产量、查询我的报工记录</summary>
 [ApiController]
 [Route("api/worker/work-reports")]
-[Authorize(Roles = "Worker,Inspector")]
+[Authorize(Roles = "Worker,Inspector,Programmer,Admin")]
 [Tags("工人端-扫码报工")]
 public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
 {
@@ -39,6 +39,29 @@ public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
         if (error is not null)
             return BadRequest(new { message = error });
 
+        // 如果带工序关联，校验流转卡与工序，并冗余工序名
+        string? processStepName = null;
+        if (req.ProcessCardId is > 0)
+        {
+            var card = await db.ProcessCards
+                .Include(x => x.CardSteps)
+                .FirstOrDefaultAsync(x => x.Id == req.ProcessCardId);
+            if (card is null)
+                return BadRequest(new { message = "工艺流转卡不存在" });
+            if (card.ProductId != req.ProductId)
+                return BadRequest(new { message = "流转卡与产品不匹配" });
+            if (card.Status == "Completed")
+                return BadRequest(new { message = "该批次已完工，不能再报工" });
+
+            if (req.ProcessStepNo is > 0)
+            {
+                var step = card.CardSteps.FirstOrDefault(x => x.StepNo == req.ProcessStepNo);
+                if (step is null)
+                    return BadRequest(new { message = $"流转卡中没有第 {req.ProcessStepNo} 道工序" });
+                processStepName = step.StepName;
+            }
+        }
+
         var report = new WorkReport
         {
             ProductId = req.ProductId,
@@ -50,6 +73,9 @@ public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
             QualifiedQty = req.QualifiedQty,
             DefectQty = req.DefectQty,
             ScanPayload = req.ScanPayload,
+            ProcessCardId = req.ProcessCardId,
+            ProcessStepNo = req.ProcessStepNo,
+            ProcessStepName = processStepName,
             Remark = req.Remark
         };
         db.WorkReports.Add(report);

@@ -18,6 +18,9 @@ public class Product
     /// <summary>二维码内容，扫码报工时匹配，如 PROD:P001</summary>
     public string? QrCode { get; set; }
 
+    /// <summary>现场照片 URL（上传后返回的相对路径，如 /uploads/202608/xxx.jpg）</summary>
+    public string? ImageUrl { get; set; }
+
     /// <summary>创建时间</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

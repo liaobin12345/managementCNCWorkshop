@@ -23,8 +23,8 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         {
             workshops = await db.Workshops.Select(x => new { x.Id, x.Code, x.Name }).ToListAsync(),
             employees = await db.Employees.Select(x => new { x.Id, x.EmployeeNo, x.Name, x.Role, x.WorkshopId }).ToListAsync(),
-            products = await db.Products.Select(x => new { x.Id, x.Code, x.Name, x.QrCode }).ToListAsync(),
-            equipments = await db.Equipments.Select(x => new { x.Id, x.Code, x.Name, x.QrCode, x.WorkshopId }).ToListAsync()
+            products = await db.Products.Select(x => new { x.Id, x.Code, x.Name, x.QrCode, x.ImageUrl }).ToListAsync(),
+            equipments = await db.Equipments.Select(x => new { x.Id, x.Code, x.Name, x.QrCode, x.ImageUrl, x.WorkshopId }).ToListAsync()
         });
     }
 
@@ -105,6 +105,27 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         return product is null ? NotFound() : Ok(product);
     }
 
+    /// <summary>更新产品（含现场照片）</summary>
+    [HttpPut("products/{id}")]
+    [ProducesResponseType(typeof(Product), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateProduct(int id, [FromBody] Product input)
+    {
+        var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
+        if (product is null)
+            return NotFound(new { message = "产品不存在" });
+        if (await db.Products.AnyAsync(x => x.Code == input.Code && x.Id != id))
+            return BadRequest(new { message = $"产品编码 {input.Code} 已存在" });
+
+        product.Code = input.Code;
+        product.Name = input.Name;
+        product.Specification = input.Specification;
+        product.QrCode = input.QrCode;
+        product.ImageUrl = input.ImageUrl;
+        await db.SaveChangesAsync();
+        return Ok(product);
+    }
+
     /// <summary>获取设备列表</summary>
     [HttpGet("equipments")]
     [ProducesResponseType(typeof(List<Equipment>), StatusCodes.Status200OK)]
@@ -139,5 +160,29 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
     {
         var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.QrCode == code);
         return equipment is null ? NotFound() : Ok(equipment);
+    }
+
+    /// <summary>更新设备（含现场照片）</summary>
+    [HttpPut("equipments/{id}")]
+    [ProducesResponseType(typeof(Equipment), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateEquipment(int id, [FromBody] Equipment input)
+    {
+        var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.Id == id);
+        if (equipment is null)
+            return NotFound(new { message = "设备不存在" });
+        if (await db.Equipments.AnyAsync(x => x.Code == input.Code && x.Id != id))
+            return BadRequest(new { message = $"设备编码 {input.Code} 已存在" });
+        if (input.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == input.WorkshopId))
+            return BadRequest(new { message = "所选车间不存在" });
+
+        equipment.Code = input.Code;
+        equipment.Name = input.Name;
+        equipment.WorkshopId = input.WorkshopId;
+        equipment.Status = input.Status;
+        equipment.QrCode = input.QrCode;
+        equipment.ImageUrl = input.ImageUrl;
+        await db.SaveChangesAsync();
+        return Ok(equipment);
     }
 }

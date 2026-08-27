@@ -56,6 +56,49 @@ public class AdminQualityController(AppDbContext db) : ControllerBase
         return Ok(await AggregateAsync(q));
     }
 
+    /// <summary>按产品与工序统计质量</summary>
+    [HttpGet("stats/process")]
+    [ProducesResponseType(typeof(List<QualityProcessStatDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ProcessStats(
+        [FromQuery] DateTime? date,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? workshopId,
+        [FromQuery] int? productId,
+        [FromQuery] int? processCardId,
+        [FromQuery] int? processStepNo)
+    {
+        var q = db.QualityRecords
+            .Include(x => x.Product)
+            .Include(x => x.ProcessCard)
+            .Where(x => x.ProcessCardId.HasValue && x.ProcessStepNo.HasValue)
+            .AsNoTracking();
+        var start = from?.Date ?? date?.Date;
+        var end = to?.Date.AddDays(1) ?? (date.HasValue ? date.Value.Date.AddDays(1) : (DateTime?)null);
+        if (start.HasValue) q = q.Where(x => x.RecordDate >= start.Value);
+        if (end.HasValue) q = q.Where(x => x.RecordDate < end.Value);
+        if (workshopId.HasValue) q = q.Where(x => x.WorkshopId == workshopId);
+        if (productId.HasValue) q = q.Where(x => x.ProductId == productId);
+        if (processCardId.HasValue) q = q.Where(x => x.ProcessCardId == processCardId);
+        if (processStepNo.HasValue) q = q.Where(x => x.ProcessStepNo == processStepNo);
+
+        var records = await q.ToListAsync();
+        return Ok(records.GroupBy(x => new { x.ProductId, x.ProcessCardId, x.ProcessStepNo, x.ProcessStepName })
+            .Select(g => new QualityProcessStatDto
+            {
+                ProductId = g.Key.ProductId,
+                ProductName = g.First().Product?.Name,
+                ProductSpec = g.First().Product?.Specification,
+                ProcessCardId = g.Key.ProcessCardId,
+                CardCode = g.First().ProcessCard?.Code,
+                ProcessStepNo = g.Key.ProcessStepNo,
+                ProcessStepName = g.Key.ProcessStepName,
+                SampleQty = g.Sum(x => x.SampleQty),
+                QualifiedQty = g.Sum(x => x.QualifiedQty),
+                DefectQty = g.Sum(x => x.DefectQty)
+            }).OrderByDescending(x => x.DefectQty).ToList());
+    }
+
     /// <summary>质量周统计</summary>
     [HttpGet("stats/weekly")]
     [ProducesResponseType(typeof(List<QualityStatDto>), StatusCodes.Status200OK)]
@@ -88,11 +131,14 @@ public class AdminQualityController(AppDbContext db) : ControllerBase
     }
 
     private static List<QualityStatDto> AggregateInMemory(IEnumerable<QualityRecord> source) =>
-        source.GroupBy(x => new { x.WorkshopId, x.ProductId })
+        source.GroupBy(x => new { x.WorkshopId, x.ProductId, x.ProcessCardId, x.ProcessStepNo, x.ProcessStepName })
             .Select(g => new QualityStatDto
             {
                 WorkshopId = g.Key.WorkshopId,
                 ProductId = g.Key.ProductId,
+                ProcessCardId = g.Key.ProcessCardId,
+                ProcessStepNo = g.Key.ProcessStepNo,
+                ProcessStepName = g.Key.ProcessStepName,
                 SampleQty = g.Sum(x => x.SampleQty),
                 QualifiedQty = g.Sum(x => x.QualifiedQty),
                 DefectQty = g.Sum(x => x.DefectQty),

@@ -8,7 +8,12 @@ export default defineConfig({
     proxy: {
       // 开发环境代理到后端 API，避免跨域
       '/api': {
-        target: 'http://localhost:5216',
+        target: 'http://localhost:5219',
+        changeOrigin: true
+      },
+      // 现场照片静态资源
+      '/uploads': {
+        target: 'http://localhost:5219',
         changeOrigin: true
       }
     }

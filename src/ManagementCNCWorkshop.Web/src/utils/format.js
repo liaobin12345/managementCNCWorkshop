@@ -16,6 +16,12 @@ export function formatDate(v) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+export function fmtPercent(v, digits = 1) {
+  const n = Number(v)
+  if (Number.isNaN(n)) return '-'
+  return `${(n * 100).toFixed(digits)}%`
+}
+
 // ISO 周号（与后端 ISOWeek 计算一致）
 export function isoWeek(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -26,9 +32,9 @@ export function isoWeek(date) {
   return { year: d.getUTCFullYear(), week }
 }
 
-export const roleLabel = { Admin: '管理员', Worker: '操作工', Inspector: '质检员' }
+export const roleLabel = { Admin: '管理员', Worker: '操作工', Inspector: '质检员', Programmer: '编程技术员' }
 
-export const roleType = { Admin: 'danger', Worker: 'primary', Inspector: 'warning' }
+export const roleType = { Admin: 'danger', Worker: 'primary', Inspector: 'warning', Programmer: 'success' }
 
 export const equipmentStatusLabel = { Running: '运行中', Idle: '空闲', Maintenance: '保养中', Fault: '故障' }
 

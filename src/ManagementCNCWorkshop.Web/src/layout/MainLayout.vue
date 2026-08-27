@@ -44,6 +44,18 @@
           <el-menu-item index="/maintenance/plans">保养计划</el-menu-item>
           <el-menu-item index="/maintenance/reminders">保养提醒</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="process">
+          <template #title>
+            <el-icon><SetUp /></el-icon>
+            <span>工艺管理</span>
+          </template>
+          <el-menu-item index="/process/flows">工艺路线</el-menu-item>
+          <el-menu-item index="/process/cards">工艺流转卡</el-menu-item>
+        </el-sub-menu>
+        <el-menu-item index="/equipment-time">
+          <el-icon><Clock /></el-icon>
+          <span>设备时间</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

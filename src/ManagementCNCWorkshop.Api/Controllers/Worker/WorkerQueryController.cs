@@ -11,7 +11,7 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 /// <summary>工人端基础查询：我的信息、车间、产品、设备（供扫码/下拉选择）</summary>
 [ApiController]
 [Route("api/worker")]
-[Authorize(Roles = "Worker,Inspector")]
+[Authorize(Roles = "Worker,Inspector,Programmer,Admin")]
 [Tags("工人端-查询")]
 public class WorkerQueryController(AppDbContext db) : ControllerBase
 {

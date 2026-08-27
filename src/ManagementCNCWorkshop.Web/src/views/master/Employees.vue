@@ -47,6 +47,7 @@
           <el-radio-group v-model="form.role">
             <el-radio value="Worker">操作工</el-radio>
             <el-radio value="Inspector">质检员</el-radio>
+            <el-radio value="Programmer">编程技术员</el-radio>
             <el-radio value="Admin">管理员</el-radio>
           </el-radio-group>
         </el-form-item>

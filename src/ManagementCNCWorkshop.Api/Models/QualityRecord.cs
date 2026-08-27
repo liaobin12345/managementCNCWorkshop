@@ -30,6 +30,15 @@ public class QualityRecord
     /// <summary>不良类型描述，如 尺寸超差、表面划伤</summary>
     public string? DefectType { get; set; }
 
+    /// <summary>关联工艺流转卡（可选，历史记录允许为空）</summary>
+    public int? ProcessCardId { get; set; }
+
+    /// <summary>关联工序序号</summary>
+    public int? ProcessStepNo { get; set; }
+
+    /// <summary>工序名称快照</summary>
+    public string? ProcessStepName { get; set; }
+
     /// <summary>备注</summary>
     public string? Remark { get; set; }
 
@@ -41,4 +50,7 @@ public class QualityRecord
 
     /// <summary>关联质检员</summary>
     public Employee? Inspector { get; set; }
+
+    /// <summary>关联工艺流转卡</summary>
+    public ProcessCard? ProcessCard { get; set; }
 }

@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:5216
+@baseUrl = http://localhost:5219
 
 ### ========== 0. 健康检查（先确认服务已启动）==========
 GET {{baseUrl}}/api/health

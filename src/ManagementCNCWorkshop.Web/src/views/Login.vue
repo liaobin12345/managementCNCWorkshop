@@ -22,7 +22,7 @@
       </el-form>
 
       <el-alert type="info" :closable="false" class="login-tip">
-        <template #title>演示账号：管理员 E900 / admin123</template>
+        <template #title>演示账号：管理员 E900 / admin123；编程技术员 E004 / 123456</template>
       </el-alert>
     </el-card>
   </div>

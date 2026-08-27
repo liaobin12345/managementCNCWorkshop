@@ -33,6 +33,15 @@ public class WorkReport
     /// <summary>扫码原始内容</summary>
     public string? ScanPayload { get; set; }
 
+    /// <summary>关联的工艺流转卡 ID（可选，报工归属到具体批次）</summary>
+    public int? ProcessCardId { get; set; }
+
+    /// <summary>关联的工序序号（属于流转卡的第几道工序）</summary>
+    public int? ProcessStepNo { get; set; }
+
+    /// <summary>工序名称冗余（便于统计与展示）</summary>
+    public string? ProcessStepName { get; set; }
+
     /// <summary>备注</summary>
     public string? Remark { get; set; }
 

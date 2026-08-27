@@ -1,0 +1,88 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/home/home",
+      "style": {
+        "navigationBarTitleText": "工作台",
+        "enablePullDownRefresh": true,
+        "backgroundTextStyle": "dark"
+      }
+    },
+    {
+      "path": "pages/scan/scan",
+      "style": {
+        "navigationBarTitleText": "扫码报工"
+      }
+    },
+    {
+      "path": "pages/stats/stats",
+      "style": {
+        "navigationBarTitleText": "产量统计"
+      }
+    },
+    {
+      "path": "pages/quality/quality",
+      "style": {
+        "navigationBarTitleText": "质量追踪"
+      }
+    },
+    {
+      "path": "pages/maintenance/maintenance",
+      "style": {
+        "navigationBarTitleText": "设备保养"
+      }
+    },
+    {
+      "path": "pages/equipment-time/equipment-time",
+      "style": {
+        "navigationBarTitleText": "设备时间"
+      }
+    },
+    {
+      "path": "pages/master/master",
+      "style": {
+        "navigationBarTitleText": "数据字典"
+      }
+    },
+    {
+      "path": "pages/process/process",
+      "style": {
+        "navigationBarTitleText": "工艺流转卡",
+        "enablePullDownRefresh": true,
+        "backgroundTextStyle": "dark"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#94a3b8",
+    "selectedColor": "#f59e0b",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "工作台"
+      },
+      {
+        "pagePath": "pages/scan/scan",
+        "text": "扫码报工"
+      },
+      {
+        "pagePath": "pages/stats/stats",
+        "text": "统计"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "CNC 车间",
+    "navigationBarBackgroundColor": "#0e2238",
+    "backgroundColor": "#eef2f7"
+  }
+}

@@ -57,7 +57,7 @@ zsh scripts/restore.sh      # 首次执行，修复 NuGet 权限并还原
 dotnet run --project src/ManagementCNCWorkshop.Api
 ```
 
-浏览器打开 `http://localhost:5216/swagger`。
+浏览器打开 `http://localhost:5219/swagger`。
 
 ### 2. 启动运营后台（Web 管理端）
 
@@ -69,7 +69,7 @@ npm run dev
 
 浏览器打开 `http://localhost:5173`，使用管理员账号登录。
 
-> Vite 开发服务器已配置 `/api` 代理到 `http://localhost:5216`，无需处理跨域。
+> Vite 开发服务器已配置 `/api` 代理到 `http://localhost:5219`，无需处理跨域。
 
 ## 演示账号
 
@@ -118,12 +118,12 @@ npm run dev
 
 ```bash
 # 1. 登录获取 token
-curl -X POST http://localhost:5216/api/auth/login \
+curl -X POST http://localhost:5219/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"employeeNo":"E900","password":"admin123"}'
 
 # 2. 携带 token 调用运营后台接口
-curl http://localhost:5216/api/admin/stats/production/daily \
+curl http://localhost:5219/api/admin/stats/production/daily \
   -H "Authorization: Bearer <token>"
 ```
 

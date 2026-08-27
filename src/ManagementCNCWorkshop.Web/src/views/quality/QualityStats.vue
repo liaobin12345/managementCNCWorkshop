@@ -41,18 +41,21 @@
     </el-card>
 
     <el-card shadow="hover">
-      <template #header>统计明细（按产品）</template>
-      <el-table :data="rows" stripe v-loading="loading">
-        <el-table-column label="产品" min-width="180">
-          <template #default="{ row }">{{ productMap[row.productId] || `产品 #${row.productId}` }}</template>
+      <template #header>统计明细（产品 + 工序）</template>
+      <el-table :data="processRows" stripe v-loading="loading">
+        <el-table-column label="产品" min-width="160">
+          <template #default="{ row }"><div>{{ row.productName || productMap[row.productId] || `产品 #${row.productId}` }}</div><div class="sub">{{ row.productSpec || '-' }}</div></template>
         </el-table-column>
-        <el-table-column prop="sampleQty" label="抽检数" align="right" width="110" />
-        <el-table-column prop="qualifiedQty" label="合格" align="right" width="110" />
-        <el-table-column prop="defectQty" label="不良" align="right" width="110" />
-        <el-table-column label="合格率" align="right" width="110">
-          <template #default="{ row }">{{ passRate(row) }}%</template>
+        <el-table-column label="工序" min-width="150">
+          <template #default="{ row }"><el-tag type="primary" size="small">工序{{ row.processStepNo }}</el-tag> {{ row.processStepName || '未命名工序' }}</template>
         </el-table-column>
+        <el-table-column prop="cardCode" label="流转卡" min-width="145" />
+        <el-table-column prop="sampleQty" label="抽检数" align="right" width="100" />
+        <el-table-column prop="qualifiedQty" label="合格" align="right" width="90" />
+        <el-table-column prop="defectQty" label="不良" align="right" width="90" />
+        <el-table-column label="合格率" align="right" width="110"><template #default="{ row }"><el-progress :percentage="Number((row.passRate * 100).toFixed(1))" :stroke-width="8" :format="() => `${(row.passRate * 100).toFixed(1)}%`" /></template></el-table-column>
       </el-table>
+      <el-empty v-if="!processRows.length" description="暂无已关联工序的质量数据" :image-size="70" />
     </el-card>
   </div>
 </template>
@@ -70,6 +73,7 @@ const month = reactive({ year: new Date().getFullYear(), month: new Date().getMo
 const workshopId = ref(null)
 const loading = ref(false)
 const rows = ref([])
+const processRows = ref([])
 const productMap = ref({})
 const workshops = ref([])
 
@@ -112,10 +116,13 @@ async function load() {
     const params = { workshopId: workshopId.value || undefined }
     if (mode.value === 'daily') {
       rows.value = await adminApi.qualityStats('daily', { ...params, date: date.value })
+      processRows.value = await adminApi.qualityProcessStats({ ...params, date: date.value })
     } else if (mode.value === 'weekly') {
       rows.value = await adminApi.qualityStats('weekly', { ...params, year: week.year, week: week.week })
+      processRows.value = await adminApi.qualityProcessStats({ ...params, from: undefined, to: undefined })
     } else {
       rows.value = await adminApi.qualityStats('monthly', { ...params, year: month.year, month: month.month })
+      processRows.value = await adminApi.qualityProcessStats({ ...params })
     }
   } finally {
     loading.value = false

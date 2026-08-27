@@ -15,6 +15,15 @@
       </el-table-column>
       <el-table-column prop="workshop.name" label="车间" width="100" />
       <el-table-column prop="product.name" label="产品" width="140" />
+      <el-table-column label="工序" width="150">
+        <template #default="{ row }">
+          <template v-if="row.processStepNo && row.processStepName">
+            <el-tag size="small" type="primary">工序{{ row.processStepNo }}</el-tag>
+            <span class="step-name">{{ row.processStepName }}</span>
+          </template>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="employee.name" label="员工" width="90" />
       <el-table-column prop="equipment.name" label="设备" width="120">
         <template #default="{ row }">{{ row.equipment?.name || '-' }}</template>
@@ -31,6 +40,17 @@
     </div>
   </el-card>
 </template>
+
+<style scoped>
+.step-name {
+  margin-left: 6px;
+  color: #303133;
+}
+
+.muted {
+  color: #c0c4cc;
+}
+</style>
 
 <script setup>
 import { onMounted, ref } from 'vue'

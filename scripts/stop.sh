@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 停止占用 5216 端口的 API 进程
+# 停止占用 5219 端口的 API 进程
 # 用法：zsh scripts/stop.sh
 
-PORT=5216
+PORT=5219
 PIDS=($(lsof -ti :$PORT 2>/dev/null))
 
 if [ ${#PIDS[@]} -eq 0 ]; then

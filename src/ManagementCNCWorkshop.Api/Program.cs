@@ -1,12 +1,17 @@
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
 using ManagementCNCWorkshop.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+
+// 确保 wwwroot 目录存在（静态文件服务用）
+Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"));
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,7 +23,12 @@ if (args.Contains("migrate"))
     return;
 }
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -30,7 +40,7 @@ builder.Services.AddSwaggerGen(options =>
             CNC 数据车间管理系统后端接口（V2 架构拆分版）。
 
             ## 架构说明
-            - **工人端**（`/api/worker/*`）：角色 Worker / Inspector，供 UniApp 小程序调用
+            - **工人端**（`/api/worker/*`）：角色 Worker / Inspector / Programmer，供 UniApp 小程序调用
             - **运营后台**（`/api/admin/*`）：角色 Admin，供 Web 管理端调用
             - **认证**（`/api/auth/*`）：首次通过 POST /api/auth/login 获取 JWT，后续请求发在 Authorization: Bearer 头
 
@@ -38,6 +48,7 @@ builder.Services.AddSwaggerGen(options =>
             | 角色 | 工号 | 密码 |
             |------|------|------|
             | 管理员 | E900 | admin123 |
+            | 编程技术员 | E004 | 123456 |
             | 操作工 | E001 | 123456 |
             | 操作工 | E002 | 123456 |
             | 质检员 | E003 | 123456 |
@@ -120,6 +131,40 @@ using (var scope = app.Services.CreateScope())
     if (dbProvider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
         await CreateDatabaseIfNotExistsAsync(connString);
     db.Database.EnsureCreated();
+
+    if (dbProvider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
+    {
+        // MySQL 补充模型新增的列（EnsureCreated 不会改已有表结构）
+        await EnsureMySqlColumnAsync(connString, "Products", "ImageUrl", "longtext NULL");
+        await EnsureMySqlColumnAsync(connString, "Equipments", "ImageUrl", "longtext NULL");
+        await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessCardId", "int NULL");
+        await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessStepNo", "int NULL");
+        await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessStepName", "longtext NULL");
+        await EnsureMySqlEquipmentTimeTableAsync(connString);
+        await EnsureMySqlProcessTablesAsync(connString);
+        await EnsureMySqlProcessCardColumnsAsync(connString);
+        await EnsureMySqlQualityProcessColumnsAsync(connString);
+    }
+    else
+    {
+        // 旧 SQLite 库可能缺少模型新增的列，自动补充（文件不存在则跳过）
+        var sqlitePath = Path.Combine(app.Environment.ContentRootPath, "workshop.db");
+        if (File.Exists(sqlitePath))
+        {
+            await EnsureColumnAsync(sqlitePath, "Products", "ImageUrl");
+            await EnsureColumnAsync(sqlitePath, "Equipments", "ImageUrl");
+            await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessCardId");
+            await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessStepNo");
+            await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessStepName");
+            await EnsureSqliteEquipmentTimeTableAsync(sqlitePath);
+            await EnsureSqliteProcessTablesAsync(sqlitePath);
+            await EnsureSqliteProcessCardColumnsAsync(sqlitePath);
+            await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessCardId");
+            await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepNo");
+            await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepName");
+        }
+    }
+
     DbSeed.Seed(db);
 }
 
@@ -130,18 +175,24 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// 静态文件服务：供 /uploads/... 现场照片访问
+app.UseStaticFiles();
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// SPA 回退：非 API 请求全部返回 index.html，由前端路由接管（支持 history 模式刷新）
+app.MapFallbackToFile("index.html");
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     Console.WriteLine();
     Console.WriteLine("========================================");
     Console.WriteLine("  CNC 车间管理系统 API 已启动");
-    Console.WriteLine("  浏览器: http://localhost:5216/swagger");
-    Console.WriteLine("  健康检查: http://localhost:5216/api/health");
+    Console.WriteLine("  浏览器: http://localhost:5219/swagger");
+    Console.WriteLine("  健康检查: http://localhost:5219/api/health");
     Console.WriteLine("  演示账号: 管理员 E900/admin123");
     Console.WriteLine("  操作工   E001～E002/123456");
     Console.WriteLine("  质检员   E003/123456");
@@ -166,6 +217,10 @@ static async Task MigrateSqliteToMySqlAsync(string contentRoot, IConfiguration c
 
     var optionsSqlite = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={sqlitePath}").Options;
     var optionsMySql = new DbContextOptionsBuilder<AppDbContext>().UseMySql(mysqlConn, ServerVersion.AutoDetect(mysqlConn)).Options;
+
+    // 旧 SQLite 库可能没有模型新增的 ImageUrl 列，先补上
+    await EnsureColumnAsync(sqlitePath, "Products", "ImageUrl");
+    await EnsureColumnAsync(sqlitePath, "Equipments", "ImageUrl");
 
     await CreateDatabaseIfNotExistsAsync(mysqlConn);
 
@@ -223,6 +278,29 @@ static async Task MigrateSqliteToMySqlAsync(string contentRoot, IConfiguration c
     await mysql.SaveChangesAsync();
     Console.WriteLine($"  保养提醒：{reminders.Count} 条");
 
+    // 工艺路线/工序/流转卡（保证 MySQL 中已建表）
+    await EnsureMySqlProcessTablesAsync(mysqlConn);
+
+    var processFlows = await sqlite.ProcessFlows.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+    mysql.ProcessFlows.AddRange(processFlows);
+    await mysql.SaveChangesAsync();
+    Console.WriteLine($"  工艺路线：{processFlows.Count} 条");
+
+    var processSteps = await sqlite.ProcessSteps.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+    mysql.ProcessSteps.AddRange(processSteps);
+    await mysql.SaveChangesAsync();
+    Console.WriteLine($"  工序：{processSteps.Count} 条");
+
+    var processCards = await sqlite.ProcessCards.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+    mysql.ProcessCards.AddRange(processCards);
+    await mysql.SaveChangesAsync();
+    Console.WriteLine($"  流转卡：{processCards.Count} 条");
+
+    var processCardSteps = await sqlite.ProcessCardSteps.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+    mysql.ProcessCardSteps.AddRange(processCardSteps);
+    await mysql.SaveChangesAsync();
+    Console.WriteLine($"  流转卡工序：{processCardSteps.Count} 条");
+
     Console.WriteLine();
     Console.WriteLine("========== 迁移完成！现在可以正常启动后端（连接 MySQL） ==========");
 }
@@ -239,4 +317,359 @@ static async Task CreateDatabaseIfNotExistsAsync(string mysqlConn)
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = $"CREATE DATABASE IF NOT EXISTS `{dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
     await cmd.ExecuteNonQueryAsync();
+}
+
+/// <summary>前置兼容：给旧 SQLite 表补充新字段（ALTER TABLE 仅在列不存在时执行）</summary>
+static async Task EnsureColumnAsync(string sqlitePath, string table, string column)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    var cols = new List<string>();
+    await using (var cmd = conn.CreateCommand())
+    {
+        cmd.CommandText = $"PRAGMA table_info(`{table}`)";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            cols.Add(reader.GetString(1));
+    }
+
+    if (cols.Contains(column)) return;
+
+    await using var cmd2 = conn.CreateCommand();
+    cmd2.CommandText = $"ALTER TABLE `{table}` ADD COLUMN `{column}` TEXT NULL";
+    await cmd2.ExecuteNonQueryAsync();
+    Console.WriteLine($"  SQLite 表 {table} 已补充列 {column}");
+}
+
+/// <summary>前置兼容：给 MySQL 表补充新字段（EnsureCreated 不会修改已有表结构）</summary>
+static async Task EnsureMySqlColumnAsync(string mysqlConn, string table, string column, string definition)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    await using var check = conn.CreateCommand();
+    check.CommandText =
+        $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+        $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND COLUMN_NAME = '{column}'";
+    if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) return;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = $"ALTER TABLE `{table}` ADD COLUMN `{column}` {definition}";
+    await cmd.ExecuteNonQueryAsync();
+    Console.WriteLine($"  MySQL 表 {table} 已补充列 {column}");
+}
+
+static async Task EnsureMySqlEquipmentTimeTableAsync(string mysqlConn)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    await using var check = conn.CreateCommand();
+    check.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'EquipmentTimeRecords'";
+    if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) return;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = @"
+CREATE TABLE `EquipmentTimeRecords` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `EquipmentId` int NOT NULL,
+  `RecordDate` datetime NOT NULL,
+  `SetupHours` decimal(10,2) NOT NULL,
+  `RunningHours` decimal(10,2) NOT NULL,
+  `IdleHours` decimal(10,2) NOT NULL,
+  `EmployeeId` int NULL,
+  `Remark` longtext NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `IX_EquipmentTimeRecords_EquipmentId_RecordDate` (`EquipmentId`,`RecordDate`),
+  KEY `IX_EquipmentTimeRecords_EquipmentId` (`EquipmentId`),
+  KEY `IX_EquipmentTimeRecords_EmployeeId` (`EmployeeId`),
+  CONSTRAINT `FK_EquipmentTimeRecords_Equipments_EquipmentId` FOREIGN KEY (`EquipmentId`) REFERENCES `Equipments` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `FK_EquipmentTimeRecords_Employees_EmployeeId` FOREIGN KEY (`EmployeeId`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+    await cmd.ExecuteNonQueryAsync();
+    Console.WriteLine("  MySQL 表 EquipmentTimeRecords 已补充");
+}
+
+static async Task EnsureSqliteEquipmentTimeTableAsync(string sqlitePath)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    await using var check = conn.CreateCommand();
+    check.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='EquipmentTimeRecords'";
+    var exists = await check.ExecuteScalarAsync();
+    if (exists is not null) return;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = @"
+CREATE TABLE IF NOT EXISTS EquipmentTimeRecords (
+  Id INTEGER NOT NULL CONSTRAINT PK_EquipmentTimeRecords PRIMARY KEY AUTOINCREMENT,
+  EquipmentId INTEGER NOT NULL,
+  RecordDate TEXT NOT NULL,
+  SetupHours TEXT NOT NULL,
+  RunningHours TEXT NOT NULL,
+  IdleHours TEXT NOT NULL,
+  EmployeeId INTEGER NULL,
+  Remark TEXT NULL,
+  CreatedAt TEXT NOT NULL,
+  CONSTRAINT FK_EquipmentTimeRecords_Equipments_EquipmentId FOREIGN KEY (EquipmentId) REFERENCES Equipments (Id) ON DELETE CASCADE,
+  CONSTRAINT FK_EquipmentTimeRecords_Employees_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees (Id) ON DELETE SET NULL
+);";
+    await cmd.ExecuteNonQueryAsync();
+    Console.WriteLine("  SQLite 表 EquipmentTimeRecords 已补充");
+}
+
+/// <summary>MySQL：补充工艺路线/工序/流转卡表</summary>
+static async Task EnsureMySqlProcessTablesAsync(string mysqlConn)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" + table + "'";
+        if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  MySQL 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("ProcessFlows", @"
+CREATE TABLE `ProcessFlows` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `Code` varchar(64) NOT NULL,
+  `Name` longtext NOT NULL,
+  `ProductId` int NOT NULL,
+  `Version` int NOT NULL,
+  `Status` varchar(32) NOT NULL,
+  `Description` longtext NULL,
+  `CreatedById` int NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_ProcessFlows_ProductId` (`ProductId`),
+  KEY `IX_ProcessFlows_Status` (`Status`),
+  KEY `IX_ProcessFlows_CreatedById` (`CreatedById`),
+  CONSTRAINT `FK_ProcessFlows_Employees_CreatedById` FOREIGN KEY (`CreatedById`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL,
+  CONSTRAINT `FK_ProcessFlows_Products_ProductId` FOREIGN KEY (`ProductId`) REFERENCES `Products` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("ProcessSteps", @"
+CREATE TABLE `ProcessSteps` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ProcessFlowId` int NOT NULL,
+  `StepNo` int NOT NULL,
+  `Name` longtext NOT NULL,
+  `Description` longtext NULL,
+  `EquipmentId` int NULL,
+  `DurationMinutes` int NULL,
+  `RequiresInspection` tinyint(1) NOT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_ProcessSteps_ProcessFlowId_StepNo` (`ProcessFlowId`,`StepNo`),
+  KEY `IX_ProcessSteps_EquipmentId` (`EquipmentId`),
+  CONSTRAINT `FK_ProcessSteps_Equipments_EquipmentId` FOREIGN KEY (`EquipmentId`) REFERENCES `Equipments` (`Id`) ON DELETE SET NULL,
+  CONSTRAINT `FK_ProcessSteps_ProcessFlows_ProcessFlowId` FOREIGN KEY (`ProcessFlowId`) REFERENCES `ProcessFlows` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("ProcessCards", @"
+CREATE TABLE `ProcessCards` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `Code` varchar(64) NOT NULL,
+  `ProcessFlowId` int NOT NULL,
+  `ProductId` int NOT NULL,
+  `Quantity` decimal(18,4) NOT NULL,
+  `MaterialSpec` longtext NULL,
+  `SurfaceTreatment` longtext NULL,
+  `Status` varchar(32) NOT NULL,
+  `CurrentStepNo` int NOT NULL,
+  `CreatedById` int NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  `StartedAt` datetime(6) NULL,
+  `CompletedAt` datetime(6) NULL,
+  `Remark` longtext NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_ProcessCards_ProcessFlowId` (`ProcessFlowId`),
+  KEY `IX_ProcessCards_ProductId` (`ProductId`),
+  KEY `IX_ProcessCards_Status` (`Status`),
+  KEY `IX_ProcessCards_CreatedById` (`CreatedById`),
+  CONSTRAINT `FK_ProcessCards_Employees_CreatedById` FOREIGN KEY (`CreatedById`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL,
+  CONSTRAINT `FK_ProcessCards_ProcessFlows_ProcessFlowId` FOREIGN KEY (`ProcessFlowId`) REFERENCES `ProcessFlows` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `FK_ProcessCards_Products_ProductId` FOREIGN KEY (`ProductId`) REFERENCES `Products` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("ProcessCardSteps", @"
+CREATE TABLE `ProcessCardSteps` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `ProcessCardId` int NOT NULL,
+  `StepNo` int NOT NULL,
+  `StepName` longtext NOT NULL,
+  `Status` longtext NOT NULL,
+  `MachineNo` varchar(64) NULL,
+  `WorkDate` datetime(6) NULL,
+  `Shift` varchar(16) NULL,
+  `Quantity` decimal(18,4) NULL,
+  `StartedAt` datetime(6) NULL,
+  `CompletedAt` datetime(6) NULL,
+  `OperatorId` int NULL,
+  `InspectorId` int NULL,
+  `Remark` longtext NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_ProcessCardSteps_ProcessCardId_StepNo` (`ProcessCardId`,`StepNo`),
+  KEY `IX_ProcessCardSteps_OperatorId` (`OperatorId`),
+  KEY `IX_ProcessCardSteps_InspectorId` (`InspectorId`),
+  CONSTRAINT `FK_ProcessCardSteps_Employees_OperatorId` FOREIGN KEY (`OperatorId`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL,
+  CONSTRAINT `FK_ProcessCardSteps_Employees_InspectorId` FOREIGN KEY (`InspectorId`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL,
+  CONSTRAINT `FK_ProcessCardSteps_ProcessCards_ProcessCardId` FOREIGN KEY (`ProcessCardId`) REFERENCES `ProcessCards` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+}
+
+/// <summary>SQLite：补充工艺路线/工序/流转卡表</summary>
+static async Task EnsureSqliteProcessTablesAsync(string sqlitePath)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'";
+        var exists = await check.ExecuteScalarAsync();
+        if (exists is not null) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  SQLite 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("ProcessFlows", @"
+CREATE TABLE IF NOT EXISTS ProcessFlows (
+  Id INTEGER NOT NULL CONSTRAINT PK_ProcessFlows PRIMARY KEY AUTOINCREMENT,
+  Code TEXT NOT NULL,
+  Name TEXT NOT NULL,
+  ProductId INTEGER NOT NULL,
+  Version INTEGER NOT NULL,
+  Status TEXT NOT NULL,
+  Description TEXT NULL,
+  CreatedById INTEGER NULL,
+  CreatedAt TEXT NOT NULL,
+  CONSTRAINT FK_ProcessFlows_Employees_CreatedById FOREIGN KEY (CreatedById) REFERENCES Employees (Id) ON DELETE SET NULL,
+  CONSTRAINT FK_ProcessFlows_Products_ProductId FOREIGN KEY (ProductId) REFERENCES Products (Id) ON DELETE CASCADE
+);");
+
+    await CreateTableIfMissingAsync("ProcessSteps", @"
+CREATE TABLE IF NOT EXISTS ProcessSteps (
+  Id INTEGER NOT NULL CONSTRAINT PK_ProcessSteps PRIMARY KEY AUTOINCREMENT,
+  ProcessFlowId INTEGER NOT NULL,
+  StepNo INTEGER NOT NULL,
+  Name TEXT NOT NULL,
+  Description TEXT NULL,
+  EquipmentId INTEGER NULL,
+  DurationMinutes INTEGER NULL,
+  RequiresInspection INTEGER NOT NULL,
+  CONSTRAINT FK_ProcessSteps_Equipments_EquipmentId FOREIGN KEY (EquipmentId) REFERENCES Equipments (Id) ON DELETE SET NULL,
+  CONSTRAINT FK_ProcessSteps_ProcessFlows_ProcessFlowId FOREIGN KEY (ProcessFlowId) REFERENCES ProcessFlows (Id) ON DELETE CASCADE
+);");
+
+    await CreateTableIfMissingAsync("ProcessCards", @"
+CREATE TABLE IF NOT EXISTS ProcessCards (
+  Id INTEGER NOT NULL CONSTRAINT PK_ProcessCards PRIMARY KEY AUTOINCREMENT,
+  Code TEXT NOT NULL,
+  ProcessFlowId INTEGER NOT NULL,
+  ProductId INTEGER NOT NULL,
+  Quantity TEXT NOT NULL,
+  MaterialSpec TEXT NULL,
+  SurfaceTreatment TEXT NULL,
+  Status TEXT NOT NULL,
+  CurrentStepNo INTEGER NOT NULL,
+  CreatedById INTEGER NULL,
+  CreatedAt TEXT NOT NULL,
+  StartedAt TEXT NULL,
+  CompletedAt TEXT NULL,
+  Remark TEXT NULL,
+  CONSTRAINT FK_ProcessCards_Employees_CreatedById FOREIGN KEY (CreatedById) REFERENCES Employees (Id) ON DELETE SET NULL,
+  CONSTRAINT FK_ProcessCards_ProcessFlows_ProcessFlowId FOREIGN KEY (ProcessFlowId) REFERENCES ProcessFlows (Id) ON DELETE CASCADE,
+  CONSTRAINT FK_ProcessCards_Products_ProductId FOREIGN KEY (ProductId) REFERENCES Products (Id) ON DELETE CASCADE
+);");
+
+    await CreateTableIfMissingAsync("ProcessCardSteps", @"
+CREATE TABLE IF NOT EXISTS ProcessCardSteps (
+  Id INTEGER NOT NULL CONSTRAINT PK_ProcessCardSteps PRIMARY KEY AUTOINCREMENT,
+  ProcessCardId INTEGER NOT NULL,
+  StepNo INTEGER NOT NULL,
+  StepName TEXT NOT NULL,
+  Status TEXT NOT NULL,
+  MachineNo TEXT NULL,
+  WorkDate TEXT NULL,
+  Shift TEXT NULL,
+  Quantity TEXT NULL,
+  StartedAt TEXT NULL,
+  CompletedAt TEXT NULL,
+  OperatorId INTEGER NULL,
+  InspectorId INTEGER NULL,
+  Remark TEXT NULL,
+  CONSTRAINT FK_ProcessCardSteps_Employees_OperatorId FOREIGN KEY (OperatorId) REFERENCES Employees (Id) ON DELETE SET NULL,
+  CONSTRAINT FK_ProcessCardSteps_Employees_InspectorId FOREIGN KEY (InspectorId) REFERENCES Employees (Id) ON DELETE SET NULL,
+  CONSTRAINT FK_ProcessCardSteps_ProcessCards_ProcessCardId FOREIGN KEY (ProcessCardId) REFERENCES ProcessCards (Id) ON DELETE CASCADE
+);");
+}
+
+/// <summary>MySQL：补充流转卡新增的纸质卡字段</summary>
+static async Task EnsureMySqlProcessCardColumnsAsync(string mysqlConn)
+{
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCards", "MaterialSpec", "longtext NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCards", "SurfaceTreatment", "longtext NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCardSteps", "MachineNo", "varchar(64) NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCardSteps", "WorkDate", "datetime(6) NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCardSteps", "Shift", "varchar(16) NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCardSteps", "Quantity", "decimal(18,4) NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "ProcessCardSteps", "InspectorId", "int NULL");
+
+    // 补 InspectorId 索引 + 外键（已有表不会自动加）
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    await using var chkIdx = conn.CreateCommand();
+    chkIdx.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ProcessCardSteps' AND INDEX_NAME = 'IX_ProcessCardSteps_InspectorId'";
+    if (Convert.ToInt32(await chkIdx.ExecuteScalarAsync()) == 0)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "CREATE INDEX `IX_ProcessCardSteps_InspectorId` ON `ProcessCardSteps` (`InspectorId`)";
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine("  MySQL ProcessCardSteps 索引 IX_InspectorId 已补充");
+    }
+
+    await using var chkFk = conn.CreateCommand();
+    chkFk.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ProcessCardSteps' AND CONSTRAINT_NAME = 'FK_ProcessCardSteps_Employees_InspectorId'";
+    if (Convert.ToInt32(await chkFk.ExecuteScalarAsync()) == 0)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "ALTER TABLE `ProcessCardSteps` ADD CONSTRAINT `FK_ProcessCardSteps_Employees_InspectorId` FOREIGN KEY (`InspectorId`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL";
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine("  MySQL ProcessCardSteps 外键 FK_InspectorId 已补充");
+    }
+}
+
+/// <summary>SQLite：补充流转卡新增的纸质卡字段</summary>
+static async Task EnsureMySqlQualityProcessColumnsAsync(string mysqlConn)
+{
+    await EnsureMySqlColumnAsync(mysqlConn, "QualityRecords", "ProcessCardId", "int NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "QualityRecords", "ProcessStepNo", "int NULL");
+    await EnsureMySqlColumnAsync(mysqlConn, "QualityRecords", "ProcessStepName", "varchar(255) NULL");
+}
+
+static async Task EnsureSqliteProcessCardColumnsAsync(string sqlitePath)
+{
+    await EnsureColumnAsync(sqlitePath, "ProcessCards", "MaterialSpec");
+    await EnsureColumnAsync(sqlitePath, "ProcessCards", "SurfaceTreatment");
+    await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "MachineNo");
+    await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "WorkDate");
+    await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "Shift");
+    await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "Quantity");
+    await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "InspectorId");
 }

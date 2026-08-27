@@ -44,6 +44,13 @@ Thumbs.db
 ## Local runtimes
 .tools/
 
+## npm cache
+.npm-cache/
+
+## Build output
+dist/
+publish/
+
 ## App
 appsettings.*.local.json
 *.db

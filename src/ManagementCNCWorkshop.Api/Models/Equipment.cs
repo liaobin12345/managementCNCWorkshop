@@ -24,6 +24,9 @@ public class Equipment
     /// <summary>设备二维码内容，如 EQ:CNC-01</summary>
     public string? QrCode { get; set; }
 
+    /// <summary>现场照片 URL（上传后返回的相对路径，如 /uploads/202608/xxx.jpg）</summary>
+    public string? ImageUrl { get; set; }
+
     /// <summary>关联车间</summary>
     public Workshop? Workshop { get; set; }
 }

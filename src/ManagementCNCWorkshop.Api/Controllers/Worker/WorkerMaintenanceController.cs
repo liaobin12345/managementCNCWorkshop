@@ -9,7 +9,7 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 /// <summary>工人端设备保养：查看待处理提醒</summary>
 [ApiController]
 [Route("api/worker/maintenance")]
-[Authorize(Roles = "Worker,Inspector")]
+[Authorize(Roles = "Worker,Inspector,Programmer,Admin")]
 [Tags("工人端-保养")]
 public class WorkerMaintenanceController(AppDbContext db) : ControllerBase
 {
@@ -28,5 +28,17 @@ public class WorkerMaintenanceController(AppDbContext db) : ControllerBase
             q = q.Where(x => x.Equipment!.WorkshopId == workshopId);
 
         return Ok(await q.OrderBy(x => x.DueDate).ToListAsync());
+    }
+
+    /// <summary>查询保养计划（含设备信息，按下次保养日期升序）</summary>
+    [HttpGet("plans")]
+    [ProducesResponseType(typeof(List<MaintenancePlan>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Plans()
+    {
+        var list = await db.MaintenancePlans
+            .Include(x => x.Equipment)
+            .OrderBy(x => x.NextDueDate)
+            .ToListAsync();
+        return Ok(list);
     }
 }
