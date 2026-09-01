@@ -25,6 +25,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="inspector.name" label="质检员" width="90" />
+      <el-table-column prop="equipment.name" label="设备" width="120">
+        <template #default="{ row }">{{ row.equipment?.name || '-' }}</template>
+      </el-table-column>
       <el-table-column prop="sampleQty" label="抽检数" width="90" align="right" />
       <el-table-column prop="qualifiedQty" label="合格" width="90" align="right" />
       <el-table-column prop="defectQty" label="不良" width="90" align="right" />
@@ -35,6 +38,11 @@
       </el-table-column>
       <el-table-column prop="defectType" label="不良类型" width="130" />
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
+      <el-table-column label="操作" width="80" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
     </el-table>
 
     <div class="pagination">
@@ -57,6 +65,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '../../api'
 import { formatDateTime } from '../../utils/format'
 
@@ -80,6 +89,25 @@ async function load() {
     total.value = res.total
   } finally {
     loading.value = false
+  }
+}
+
+async function onDelete(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除该质检记录？\n产品：${row.product?.name || '-'} · 质检员：${row.inspector?.name || '-'} · 抽检数：${row.sampleQty}`,
+      '删除质检记录',
+      { type: 'error', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await adminApi.deleteQualityRecord(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    /* http 层已提示 */
   }
 }
 

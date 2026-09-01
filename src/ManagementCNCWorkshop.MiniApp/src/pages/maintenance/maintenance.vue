@@ -9,13 +9,17 @@
     <view v-if="tab === 'pending'">
       <view class="card">
         <view class="card-title">待处理</view>
-        <view class="todo-item" v-for="(r, i) in reminders" :key="i">
+        <view class="todo-item" v-for="r in reminders" :key="r.id">
           <view class="dot" :class="r.status === 'Overdue' ? 'red' : 'amber'"></view>
           <view class="todo-txt">
             <view class="t1">{{ r.equipment?.name || '设备' }}</view>
             <view class="t2">{{ r.plan?.planName || '保养' }} · 截止 {{ fmtDate(r.dueDate) }}（{{ dueText(r.dueDate) }}）</view>
+            <view class="t2" v-if="r.plan?.content">内容：{{ r.plan.content }}</view>
           </view>
-          <text class="tag" :class="reminderStatusTag(r.status)">{{ reminderStatus(r.status) }}</text>
+          <view class="todo-right">
+            <text class="tag" :class="reminderStatusTag(r.status)">{{ reminderStatus(r.status) }}</text>
+            <button class="complete-btn" size="mini" @tap="completeReminder(r)">完成保养</button>
+          </view>
         </view>
         <view v-if="!reminders.length" class="empty">暂无待处理提醒</view>
       </view>
@@ -46,7 +50,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { requireAuth, fmtDate, reminderStatus, reminderStatusTag } from '../../utils/format'
-import { apiRemindersPending, apiMaintenancePlans } from '../../api'
+import { apiRemindersPending, apiMaintenancePlans, apiCompleteReminder } from '../../api'
 
 const tab = ref('pending')
 const reminders = ref([])
@@ -68,6 +72,22 @@ function loadData() {
   } else {
     apiMaintenancePlans().then((r) => (plans.value = r || [])).catch(() => {})
   }
+}
+
+function completeReminder(r) {
+  uni.showModal({
+    title: '完成保养',
+    content: `确认已完成「${r.equipment?.name || '设备'}」的${r.plan?.planName || '保养'}？\n完成后将自动安排下一次保养日期。`,
+    success: (res) => {
+      if (!res.confirm) return
+      apiCompleteReminder(r.id)
+        .then(() => {
+          uni.showToast({ title: '保养已完成 ✓', icon: 'success' })
+          loadData()
+        })
+        .catch(() => {})
+    },
+  })
 }
 
 function daysLeft(dt) {
@@ -129,6 +149,34 @@ function dueColor(dt) {
 
 .todo-txt {
   flex: 1;
+}
+
+.todo-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.complete-btn {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 600;
+  border-radius: 999rpx;
+  padding: 0 28rpx;
+  line-height: 56rpx;
+  min-height: 56rpx;
+  margin: 0;
+}
+
+.complete-btn::after {
+  border: none;
+}
+
+.complete-btn.button-hover {
+  opacity: 0.85;
 }
 
 .t1 {

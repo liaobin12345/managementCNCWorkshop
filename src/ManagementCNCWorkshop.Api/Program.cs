@@ -117,6 +117,7 @@ builder.Services.AddAuthorization();
 
 // --- 注册服务 ---
 builder.Services.AddScoped<JwtTokenService>();
+builder.Services.AddHttpClient<WechatService>();
 
 // --- CORS（供 UniApp 和 Web 管理端调用） ---
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -140,10 +141,15 @@ using (var scope = app.Services.CreateScope())
         await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessCardId", "int NULL");
         await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessStepNo", "int NULL");
         await EnsureMySqlColumnAsync(connString, "WorkReports", "ProcessStepName", "longtext NULL");
+        await EnsureMySqlColumnAsync(connString, "Employees", "WeChatOpenId", "varchar(128) NULL");
         await EnsureMySqlEquipmentTimeTableAsync(connString);
         await EnsureMySqlProcessTablesAsync(connString);
         await EnsureMySqlProcessCardColumnsAsync(connString);
         await EnsureMySqlQualityProcessColumnsAsync(connString);
+        await EnsureMySqlColumnAsync(connString, "QualityRecords", "EquipmentId", "int NULL");
+        await EnsureMySqlColumnAsync(connString, "MaintenanceReminders", "CompletedById", "int NULL");
+        await EnsureMySqlColumnAsync(connString, "MaintenanceReminders", "CompletedAt", "datetime(6) NULL");
+        await EnsureMySqlInspectionTablesAsync(connString);
     }
     else
     {
@@ -156,12 +162,14 @@ using (var scope = app.Services.CreateScope())
             await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessCardId");
             await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessStepNo");
             await EnsureColumnAsync(sqlitePath, "WorkReports", "ProcessStepName");
+            await EnsureColumnAsync(sqlitePath, "Employees", "WeChatOpenId");
             await EnsureSqliteEquipmentTimeTableAsync(sqlitePath);
             await EnsureSqliteProcessTablesAsync(sqlitePath);
             await EnsureSqliteProcessCardColumnsAsync(sqlitePath);
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessCardId");
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepNo");
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepName");
+            await EnsureSqliteInspectionTablesAsync(sqlitePath);
         }
     }
 
@@ -176,6 +184,7 @@ if (app.Environment.IsDevelopment())
 }
 
 // 静态文件服务：供 /uploads/... 现场照片访问
+app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.UseCors();
@@ -672,4 +681,102 @@ static async Task EnsureSqliteProcessCardColumnsAsync(string sqlitePath)
     await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "Shift");
     await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "Quantity");
     await EnsureColumnAsync(sqlitePath, "ProcessCardSteps", "InspectorId");
+}
+
+/// <summary>MySQL：补充设备点检表（EquipmentInspections + EquipmentInspectionItems）</summary>
+static async Task EnsureMySqlInspectionTablesAsync(string mysqlConn)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" + table + "'";
+        if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  MySQL 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("EquipmentInspections", @"
+CREATE TABLE `EquipmentInspections` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `EquipmentId` int NOT NULL,
+  `InspectDate` datetime(6) NOT NULL,
+  `Shift` varchar(16) NOT NULL,
+  `InspectorId` int NULL,
+  `AbnormalNote` longtext NULL,
+  `Remark` longtext NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  `UpdatedAt` datetime(6) NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `IX_EquipmentInspections_EquipmentId_InspectDate_Shift` (`EquipmentId`,`InspectDate`,`Shift`),
+  KEY `IX_EquipmentInspections_InspectDate` (`InspectDate`),
+  KEY `IX_EquipmentInspections_InspectorId` (`InspectorId`),
+  CONSTRAINT `FK_EquipmentInspections_Equipments_EquipmentId` FOREIGN KEY (`EquipmentId`) REFERENCES `Equipments` (`Id`) ON DELETE CASCADE,
+  CONSTRAINT `FK_EquipmentInspections_Employees_InspectorId` FOREIGN KEY (`InspectorId`) REFERENCES `Employees` (`Id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("EquipmentInspectionItems", @"
+CREATE TABLE `EquipmentInspectionItems` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `InspectionId` int NOT NULL,
+  `ItemNo` int NOT NULL,
+  `ItemName` longtext NOT NULL,
+  `Status` varchar(16) NOT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_EquipmentInspectionItems_InspectionId_ItemNo` (`InspectionId`,`ItemNo`),
+  CONSTRAINT `FK_EquipmentInspectionItems_EquipmentInspections_InspectionId` FOREIGN KEY (`InspectionId`) REFERENCES `EquipmentInspections` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+}
+
+/// <summary>SQLite：补充设备点检表</summary>
+static async Task EnsureSqliteInspectionTablesAsync(string sqlitePath)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='" + table + "'";
+        if (await check.ExecuteScalarAsync() is not null) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  SQLite 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("EquipmentInspections", @"
+CREATE TABLE IF NOT EXISTS EquipmentInspections (
+  Id INTEGER NOT NULL CONSTRAINT PK_EquipmentInspections PRIMARY KEY AUTOINCREMENT,
+  EquipmentId INTEGER NOT NULL,
+  InspectDate TEXT NOT NULL,
+  Shift TEXT NOT NULL,
+  InspectorId INTEGER NULL,
+  AbnormalNote TEXT NULL,
+  Remark TEXT NULL,
+  CreatedAt TEXT NOT NULL,
+  UpdatedAt TEXT NULL,
+  CONSTRAINT FK_EquipmentInspections_Equipments_EquipmentId FOREIGN KEY (EquipmentId) REFERENCES Equipments (Id) ON DELETE CASCADE,
+  CONSTRAINT FK_EquipmentInspections_Employees_InspectorId FOREIGN KEY (InspectorId) REFERENCES Employees (Id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IX_EquipmentInspections_EquipmentId_InspectDate_Shift ON EquipmentInspections (EquipmentId, InspectDate, Shift);
+CREATE INDEX IX_EquipmentInspections_InspectDate ON EquipmentInspections (InspectDate);");
+
+    await CreateTableIfMissingAsync("EquipmentInspectionItems", @"
+CREATE TABLE IF NOT EXISTS EquipmentInspectionItems (
+  Id INTEGER NOT NULL CONSTRAINT PK_EquipmentInspectionItems PRIMARY KEY AUTOINCREMENT,
+  InspectionId INTEGER NOT NULL,
+  ItemNo INTEGER NOT NULL,
+  ItemName TEXT NOT NULL,
+  Status TEXT NOT NULL,
+  CONSTRAINT FK_EquipmentInspectionItems_EquipmentInspections_InspectionId FOREIGN KEY (InspectionId) REFERENCES EquipmentInspections (Id) ON DELETE CASCADE
+);
+CREATE INDEX IX_EquipmentInspectionItems_InspectionId_ItemNo ON EquipmentInspectionItems (InspectionId, ItemNo);");
 }

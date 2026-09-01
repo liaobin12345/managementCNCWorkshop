@@ -36,6 +36,36 @@
           <view class="field-picker readonly">{{ me.name }}（{{ me.employeeNo }}）</view>
         </view>
         <view class="field">
+          <text class="field-label">使用设备（可选）</text>
+          <picker mode="selector" :range="equipments" range-key="name" @change="onEquipmentChange">
+            <view class="field-picker">
+              <text :class="{ ph: !form.equipmentId }">{{ selectedEquipmentText || '不选设备' }}</text>
+              <text class="arrow">▾</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 工艺流转卡工序选择（可选） -->
+        <view class="field">
+          <text class="field-label">关联流转卡（可选）</text>
+          <picker mode="selector" :range="qualityCardOptions" range-key="label" @change="onQualityCardChange">
+            <view class="field-picker">
+              <text :class="{ ph: !form.processCardId }">{{ selectedQualityCardText || '不关联流转卡' }}</text>
+              <text class="arrow">▾</text>
+            </view>
+          </picker>
+        </view>
+        <view class="field" v-if="form.processCardId">
+          <text class="field-label">关联工序 *</text>
+          <picker mode="selector" :range="qualityStepOptions" range-key="label" @change="onQualityStepChange">
+            <view class="field-picker">
+              <text :class="{ ph: !form.processStepNo }">{{ selectedQualityStepText || '请选择工序' }}</text>
+              <text class="arrow">▾</text>
+            </view>
+          </picker>
+        </view>
+
+        <view class="field">
           <text class="field-label">抽检总数 *</text>
           <input class="field-input" type="number" v-model.number="form.sampleQty" placeholder="请输入抽检总数" placeholder-class="ph" />
         </view>
@@ -107,13 +137,15 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { requireAuth, currentEmployee, fmtQty, fmtPercent, currentISOWeek } from '../../utils/format'
-import { apiWorkshops, apiProducts, apiCreateQuality, apiQualityDaily, apiQualityWeekly, apiQualityMonthly } from '../../api'
+import { apiWorkshops, apiProducts, apiEquipments, apiProcessCardProgress, apiCreateQuality, apiQualityDaily, apiQualityWeekly, apiQualityMonthly } from '../../api'
 
 const defectTypes = ['尺寸超差', '表面划伤', '毛刺未清', '配合不良', '其他']
 
 const me = ref({ name: '', employeeNo: '', role: '' })
 const workshops = ref([])
 const products = ref([])
+const equipments = ref([])
+const qualityCards = ref([])
 const tab = ref('entry')
 const rtab = ref('daily')
 const list = ref([])
@@ -122,6 +154,9 @@ const submitting = ref(false)
 const form = ref({
   productId: 0,
   workshopId: 0,
+  equipmentId: 0,
+  processCardId: 0,
+  processStepNo: 0,
   sampleQty: '',
   qualifiedQty: '',
   defectQty: '',
@@ -133,6 +168,26 @@ const isInspector = computed(() => me.value.role === 'Inspector')
 
 const selectedProductText = computed(() => products.value.find((p) => p.id === form.value.productId)?.name || '')
 const selectedWorkshopText = computed(() => workshops.value.find((w) => w.id === form.value.workshopId)?.name || '')
+const selectedEquipmentText = computed(() => equipments.value.find((e) => e.id === form.value.equipmentId)?.name || '')
+
+// 流转卡工序选择
+const qualityCardOptions = computed(() =>
+  (qualityCards.value || []).map((c) => ({
+    id: c.cardId,
+    label: `${c.cardCode} · ${c.flowName || ''} ${c.statusText || ''}`.trim(),
+  }))
+)
+const selectedQualityCardText = computed(() => qualityCardOptions.value.find((c) => c.id === form.value.processCardId)?.label || '')
+const activeQualityCard = computed(() => (qualityCards.value || []).find((c) => c.cardId === form.value.processCardId) || null)
+const qualityStepOptions = computed(() => {
+  const c = activeQualityCard.value
+  if (!c) return []
+  return (c.steps || []).map((s) => ({
+    id: s.stepNo,
+    label: `${s.stepNo}. ${s.stepName}（${s.statusText}）`,
+  }))
+})
+const selectedQualityStepText = computed(() => qualityStepOptions.value.find((s) => s.id === form.value.processStepNo)?.label || '')
 
 const sampleSummary = computed(() => {
   const total = list.value.reduce((s, i) => s + Number(i.totalQty || 0), 0)
@@ -159,6 +214,7 @@ onShow(() => {
 function loadOptions() {
   apiWorkshops().then((r) => (workshops.value = r || [])).catch(() => {})
   apiProducts().then((r) => (products.value = r || [])).catch(() => {})
+  apiEquipments().then((r) => (equipments.value = r || [])).catch(() => {})
 }
 
 function switchTab(t) {
@@ -192,10 +248,57 @@ function loadReport() {
 
 function onProductChange(e) {
   form.value.productId = products.value[Number(e.detail.value)]?.id || 0
+  resetQualityCard()
+  if (form.value.productId) {
+    loadQualityCards(form.value.productId)
+  }
+}
+
+function loadQualityCards(productId) {
+  apiProcessCardProgress({ productId })
+    .then((r) => {
+      qualityCards.value = r || []
+      // 默认选第一张加工中的卡
+      const idx = qualityCards.value.findIndex((c) => !c.finished)
+      if (idx >= 0) {
+        form.value.processCardId = qualityCards.value[idx].cardId
+      }
+    })
+    .catch(() => {
+      qualityCards.value = []
+    })
+}
+
+function resetQualityCard() {
+  qualityCards.value = []
+  form.value.processCardId = 0
+  form.value.processStepNo = 0
 }
 
 function onWorkshopChange(e) {
   form.value.workshopId = workshops.value[Number(e.detail.value)]?.id || 0
+}
+
+function onEquipmentChange(e) {
+  const idx = Number(e.detail.value)
+  form.value.equipmentId = idx >= 0 ? (equipments.value[idx]?.id || 0) : 0
+}
+
+function onQualityCardChange(e) {
+  const opt = qualityCardOptions.value[Number(e.detail.value)]
+  form.value.processCardId = opt?.id || 0
+  form.value.processStepNo = 0
+  // 默认选当前工序
+  const c = activeQualityCard.value
+  if (c) {
+    const cur = (c.steps || []).find((s) => s.stepNo === c.currentStepNo && !s.finished)
+    const target = cur || (c.steps || []).find((s) => !s.finished)
+    if (target) form.value.processStepNo = target.stepNo
+  }
+}
+
+function onQualityStepChange(e) {
+  form.value.processStepNo = qualityStepOptions.value[Number(e.detail.value)]?.id || 0
 }
 
 function onDefectTypeChange(e) {
@@ -211,6 +314,9 @@ function autoDefect() {
 function submit() {
   if (!form.value.productId) return uni.showToast({ title: '请选择产品', icon: 'none' })
   if (!form.value.workshopId) return uni.showToast({ title: '请选择车间', icon: 'none' })
+  if (form.value.processCardId && !form.value.processStepNo) {
+    return uni.showToast({ title: '请选择关联工序', icon: 'none' })
+  }
   const q = Number(form.value.sampleQty)
   const qu = Number(form.value.qualifiedQty)
   if (!q || q <= 0) return uni.showToast({ title: '请输入抽检总数', icon: 'none' })
@@ -221,6 +327,9 @@ function submit() {
   apiCreateQuality({
     productId: form.value.productId,
     workshopId: form.value.workshopId,
+    equipmentId: form.value.equipmentId || null,
+    processCardId: form.value.processCardId || null,
+    processStepNo: form.value.processStepNo || null,
     sampleQty: q,
     qualifiedQty: qu,
     defectQty: Math.max(0, Number(form.value.defectQty) || 0),
@@ -230,11 +339,13 @@ function submit() {
     .then(() => {
       uni.showToast({ title: '质检记录已保存 ✓', icon: 'success' })
       form.value.productId = 0
+      form.value.equipmentId = 0
       form.value.sampleQty = ''
       form.value.qualifiedQty = ''
       form.value.defectQty = ''
       form.value.defectType = ''
       form.value.remark = ''
+      resetQualityCard()
     })
     .catch(() => {})
     .finally(() => {

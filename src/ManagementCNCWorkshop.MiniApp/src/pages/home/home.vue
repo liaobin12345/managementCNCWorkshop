@@ -42,6 +42,14 @@
           <view class="qi" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">🗂️</view>
           <text class="qn">数据字典</text>
         </view>
+        <view class="quick" @click="go('/pages/inspection/inspection')">
+          <view class="qi" style="background:linear-gradient(135deg,#14b8a6,#0d9488)">✅</view>
+          <text class="qn">设备点检</text>
+        </view>
+        <view class="quick" @click="go('/pages/inspection-report/inspection-report')">
+          <view class="qi" style="background:linear-gradient(135deg,#0e7490,#155e75)">📅</view>
+          <text class="qn">点检报表</text>
+        </view>
       </view>
     </view>
 

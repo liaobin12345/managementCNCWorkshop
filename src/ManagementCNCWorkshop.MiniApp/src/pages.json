@@ -57,6 +57,18 @@
         "enablePullDownRefresh": true,
         "backgroundTextStyle": "dark"
       }
+    },
+    {
+      "path": "pages/inspection/inspection",
+      "style": {
+        "navigationBarTitleText": "设备点检"
+      }
+    },
+    {
+      "path": "pages/inspection-report/inspection-report",
+      "style": {
+        "navigationBarTitleText": "点检报表"
+      }
     }
   ],
   "tabBar": {

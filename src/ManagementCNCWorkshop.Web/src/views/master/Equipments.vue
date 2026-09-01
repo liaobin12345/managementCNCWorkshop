@@ -40,9 +40,10 @@
         <template #default="{ row }">{{ formatDate(row.lastMaintenanceDate) }}</template>
       </el-table-column>
       <el-table-column prop="qrCode" label="二维码内容" />
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -105,7 +106,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '../../api'
 import { equipmentStatusLabel, equipmentStatusType, formatDate } from '../../utils/format'
 
@@ -192,6 +193,21 @@ async function onSubmit() {
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+async function onDelete(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除设备「${row.name}（${row.code}）」？`, '删除设备', { type: 'error' })
+  } catch {
+    return
+  }
+  try {
+    await adminApi.deleteEquipment(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    /* http 层已提示 */
   }
 }
 

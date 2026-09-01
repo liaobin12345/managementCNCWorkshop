@@ -21,9 +21,18 @@ public class MaintenanceReminder
     /// <summary>状态：Pending 待处理 / Overdue 已逾期 / Completed 已完成</summary>
     public string Status { get; set; } = "Pending";
 
+    /// <summary>完成人（员工 ID）</summary>
+    public int? CompletedById { get; set; }
+
+    /// <summary>完成时间</summary>
+    public DateTime? CompletedAt { get; set; }
+
     /// <summary>关联保养计划</summary>
     public MaintenancePlan? Plan { get; set; }
 
     /// <summary>关联设备</summary>
     public Equipment? Equipment { get; set; }
+
+    /// <summary>完成人</summary>
+    public Employee? CompletedBy { get; set; }
 }

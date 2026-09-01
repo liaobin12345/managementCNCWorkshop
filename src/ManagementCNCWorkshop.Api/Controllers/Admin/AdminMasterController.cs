@@ -1,5 +1,6 @@
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
+using ManagementCNCWorkshop.Api.Models.Dtos;
 using ManagementCNCWorkshop.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -47,6 +48,47 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         return Ok(workshop);
     }
 
+    /// <summary>更新车间</summary>
+    [HttpPut("workshops/{id}")]
+    [ProducesResponseType(typeof(Workshop), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateWorkshop(int id, [FromBody] Workshop input)
+    {
+        var workshop = await db.Workshops.FirstOrDefaultAsync(x => x.Id == id);
+        if (workshop is null)
+            return NotFound(new { message = "车间不存在" });
+        if (await db.Workshops.AnyAsync(x => x.Code == input.Code && x.Id != id))
+            return BadRequest(new { message = $"车间编码 {input.Code} 已存在" });
+
+        workshop.Code = input.Code;
+        workshop.Name = input.Name;
+        await db.SaveChangesAsync();
+        return Ok(workshop);
+    }
+
+    /// <summary>删除车间（车间下有员工或设备时禁止删除）</summary>
+    [HttpDelete("workshops/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteWorkshop(int id)
+    {
+        var workshop = await db.Workshops.FirstOrDefaultAsync(x => x.Id == id);
+        if (workshop is null)
+            return NotFound(new { message = "车间不存在" });
+
+        var employeeCount = await db.Employees.CountAsync(x => x.WorkshopId == id);
+        if (employeeCount > 0)
+            return BadRequest(new { message = $"该车间下有 {employeeCount} 名员工，请先调整员工所属车间后再删除" });
+
+        var equipmentCount = await db.Equipments.CountAsync(x => x.WorkshopId == id);
+        if (equipmentCount > 0)
+            return BadRequest(new { message = $"该车间下有 {equipmentCount} 台设备，请先调整设备所属车间后再删除" });
+
+        db.Workshops.Remove(workshop);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
+    }
+
     /// <summary>获取员工列表</summary>
     [HttpGet("employees")]
     [ProducesResponseType(typeof(List<Employee>), StatusCodes.Status200OK)]
@@ -74,6 +116,77 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         db.Employees.Add(employee);
         await db.SaveChangesAsync();
         return Ok(employee);
+    }
+
+    /// <summary>更新员工（支持重置密码）</summary>
+    [HttpPut("employees/{id}")]
+    [ProducesResponseType(typeof(Employee), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdateEmployee(int id, [FromBody] UpdateEmployeeRequest input)
+    {
+        var employee = await db.Employees.FirstOrDefaultAsync(x => x.Id == id);
+        if (employee is null)
+            return NotFound(new { message = "员工不存在" });
+        if (await db.Employees.AnyAsync(x => x.EmployeeNo == input.EmployeeNo && x.Id != id))
+            return BadRequest(new { message = $"工号 {input.EmployeeNo} 已存在" });
+        if (input.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == input.WorkshopId))
+            return BadRequest(new { message = "所选车间不存在" });
+
+        employee.EmployeeNo = input.EmployeeNo;
+        employee.Name = input.Name;
+        employee.Phone = input.Phone;
+        employee.WorkshopId = input.WorkshopId;
+        employee.Role = input.Role;
+
+        if (!string.IsNullOrEmpty(input.Password))
+        {
+            if (input.Password.Length < 6)
+                return BadRequest(new { message = "密码至少 6 位" });
+            employee.PasswordHash = PasswordHasher.Hash(input.Password);
+        }
+
+        await db.SaveChangesAsync();
+        return Ok(employee);
+    }
+
+    /// <summary>删除员工（存在业务数据引用时禁止删除）</summary>
+    [HttpDelete("employees/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteEmployee(int id)
+    {
+        var employee = await db.Employees.FirstOrDefaultAsync(x => x.Id == id);
+        if (employee is null)
+            return NotFound(new { message = "员工不存在" });
+
+        var reportCount = await db.WorkReports.CountAsync(x => x.EmployeeId == id);
+        if (reportCount > 0)
+            return BadRequest(new { message = $"该员工有 {reportCount} 条报工记录，不能删除" });
+
+        var qualityCount = await db.QualityRecords.CountAsync(x => x.InspectorId == id);
+        if (qualityCount > 0)
+            return BadRequest(new { message = $"该员工有 {qualityCount} 条质检记录，不能删除" });
+
+        var timeCount = await db.EquipmentTimeRecords.CountAsync(x => x.EmployeeId == id);
+        if (timeCount > 0)
+            return BadRequest(new { message = $"该员工有 {timeCount} 条设备时间记录，不能删除" });
+
+        var cardCount = await db.ProcessCards.CountAsync(x => x.CreatedById == id);
+        if (cardCount > 0)
+            return BadRequest(new { message = $"该员工创建了 {cardCount} 张工艺流转卡，不能删除" });
+
+        var stepOpCount = await db.ProcessCardSteps.CountAsync(x => x.OperatorId == id);
+        var stepInspCount = await db.ProcessCardSteps.CountAsync(x => x.InspectorId == id);
+        if (stepOpCount > 0 || stepInspCount > 0)
+            return BadRequest(new { message = "该员工参与过工序执行，不能删除" });
+
+        var reminderCount = await db.MaintenanceReminders.CountAsync(x => x.CompletedById == id);
+        if (reminderCount > 0)
+            return BadRequest(new { message = $"该员工完成了 {reminderCount} 条保养提醒，不能删除" });
+
+        db.Employees.Remove(employee);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
     }
 
     /// <summary>获取产品列表</summary>
@@ -124,6 +237,37 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         product.ImageUrl = input.ImageUrl;
         await db.SaveChangesAsync();
         return Ok(product);
+    }
+
+    /// <summary>删除产品（存在业务数据引用时禁止删除）</summary>
+    [HttpDelete("products/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteProduct(int id)
+    {
+        var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
+        if (product is null)
+            return NotFound(new { message = "产品不存在" });
+
+        var reportCount = await db.WorkReports.CountAsync(x => x.ProductId == id);
+        if (reportCount > 0)
+            return BadRequest(new { message = $"该产品有 {reportCount} 条报工记录，不能删除" });
+
+        var qualityCount = await db.QualityRecords.CountAsync(x => x.ProductId == id);
+        if (qualityCount > 0)
+            return BadRequest(new { message = $"该产品有 {qualityCount} 条质检记录，不能删除" });
+
+        var flowCount = await db.ProcessFlows.CountAsync(x => x.ProductId == id);
+        if (flowCount > 0)
+            return BadRequest(new { message = $"该产品关联了 {flowCount} 条工艺路线，不能删除" });
+
+        var cardCount = await db.ProcessCards.CountAsync(x => x.ProductId == id);
+        if (cardCount > 0)
+            return BadRequest(new { message = $"该产品关联了 {cardCount} 张工艺流转卡，不能删除" });
+
+        db.Products.Remove(product);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
     }
 
     /// <summary>获取设备列表</summary>
@@ -184,5 +328,40 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         equipment.ImageUrl = input.ImageUrl;
         await db.SaveChangesAsync();
         return Ok(equipment);
+    }
+
+    /// <summary>删除设备（存在业务数据引用时禁止删除）</summary>
+    [HttpDelete("equipments/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteEquipment(int id)
+    {
+        var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.Id == id);
+        if (equipment is null)
+            return NotFound(new { message = "设备不存在" });
+
+        var reportCount = await db.WorkReports.CountAsync(x => x.EquipmentId == id);
+        if (reportCount > 0)
+            return BadRequest(new { message = $"该设备有 {reportCount} 条报工记录，不能删除" });
+
+        var timeCount = await db.EquipmentTimeRecords.CountAsync(x => x.EquipmentId == id);
+        if (timeCount > 0)
+            return BadRequest(new { message = $"该设备有 {timeCount} 条设备时间记录，不能删除" });
+
+        var planCount = await db.MaintenancePlans.CountAsync(x => x.EquipmentId == id);
+        if (planCount > 0)
+            return BadRequest(new { message = $"该设备关联了 {planCount} 条保养计划，不能删除" });
+
+        var reminderCount = await db.MaintenanceReminders.CountAsync(x => x.EquipmentId == id);
+        if (reminderCount > 0)
+            return BadRequest(new { message = $"该设备关联了 {reminderCount} 条保养提醒，不能删除" });
+
+        var qualityCount = await db.QualityRecords.CountAsync(x => x.EquipmentId == id);
+        if (qualityCount > 0)
+            return BadRequest(new { message = $"该设备有 {qualityCount} 条质检记录，不能删除" });
+
+        db.Equipments.Remove(equipment);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
     }
 }

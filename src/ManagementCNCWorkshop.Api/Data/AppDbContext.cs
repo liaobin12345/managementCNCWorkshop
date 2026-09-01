@@ -20,6 +20,8 @@ public class AppDbContext : DbContext
     public DbSet<ProcessStep> ProcessSteps => Set<ProcessStep>();
     public DbSet<ProcessCard> ProcessCards => Set<ProcessCard>();
     public DbSet<ProcessCardStep> ProcessCardSteps => Set<ProcessCardStep>();
+    public DbSet<EquipmentInspection> EquipmentInspections => Set<EquipmentInspection>();
+    public DbSet<EquipmentInspectionItem> EquipmentInspectionItems => Set<EquipmentInspectionItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +78,7 @@ public class AppDbContext : DbContext
             entity.HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId);
             entity.HasOne(x => x.Inspector).WithMany().HasForeignKey(x => x.InspectorId);
             entity.HasOne(x => x.ProcessCard).WithMany().HasForeignKey(x => x.ProcessCardId).IsRequired(false);
+            entity.HasOne(x => x.Equipment).WithMany().HasForeignKey(x => x.EquipmentId).IsRequired(false);
         });
 
         modelBuilder.Entity<MaintenancePlan>(entity =>
@@ -124,6 +127,23 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Operator).WithMany().HasForeignKey(x => x.OperatorId).IsRequired(false);
             entity.HasOne(x => x.Inspector).WithMany().HasForeignKey(x => x.InspectorId).IsRequired(false);
+        });
+
+        modelBuilder.Entity<EquipmentInspection>(entity =>
+        {
+            entity.HasIndex(x => new { x.EquipmentId, x.InspectDate, x.Shift }).IsUnique();
+            entity.HasIndex(x => x.InspectDate);
+            entity.HasOne(x => x.Equipment).WithMany().HasForeignKey(x => x.EquipmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Inspector).WithMany().HasForeignKey(x => x.InspectorId)
+                .IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<EquipmentInspectionItem>(entity =>
+        {
+            entity.HasIndex(x => new { x.InspectionId, x.ItemNo });
+            entity.HasOne(x => x.Inspection).WithMany(x => x.Items).HasForeignKey(x => x.InspectionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

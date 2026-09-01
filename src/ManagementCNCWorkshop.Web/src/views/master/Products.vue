@@ -25,14 +25,19 @@
           <span v-else class="no-img">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="qrCode" label="二维码内容">
+      <el-table-column label="二维码" width="120" align="center">
         <template #default="{ row }">
-          <el-tag type="info" size="small">{{ row.qrCode }}</el-tag>
+          <div class="qr-cell">
+            <QrCodeImage v-if="row.qrCode" :text="row.qrCode" />
+            <span v-else class="no-img">-</span>
+            <div class="qr-text" :title="row.qrCode">{{ row.qrCode }}</div>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -85,8 +90,9 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '../../api'
+import QrCodeImage from '../../components/QrCodeImage.vue'
 
 const list = ref([])
 const loading = ref(false)
@@ -162,6 +168,21 @@ async function onSubmit() {
   }
 }
 
+async function onDelete(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除产品「${row.name}（${row.code}）」？`, '删除产品', { type: 'error' })
+  } catch {
+    return
+  }
+  try {
+    await adminApi.deleteProduct(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    /* http 层已提示 */
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -172,6 +193,22 @@ onMounted(load)
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid #eee;
+}
+
+.qr-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.qr-text {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #909399;
 }
 
 .no-img {

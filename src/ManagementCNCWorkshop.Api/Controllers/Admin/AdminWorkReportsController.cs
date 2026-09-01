@@ -51,4 +51,19 @@ public class AdminWorkReportsController(AppDbContext db) : ControllerBase
 
         return Ok(new PagedResult<WorkReport> { Total = total, Page = page, PageSize = pageSize, Items = items });
     }
+
+    /// <summary>删除报工记录（纠错用，物理删除）</summary>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var report = await db.WorkReports.FirstOrDefaultAsync(x => x.Id == id);
+        if (report is null)
+            return NotFound(new { message = "报工记录不存在" });
+
+        db.WorkReports.Remove(report);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
+    }
 }

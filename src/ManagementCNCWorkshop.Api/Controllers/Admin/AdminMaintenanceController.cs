@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
 using ManagementCNCWorkshop.Api.Models.Dtos;
@@ -30,15 +31,22 @@ public class AdminMaintenanceController(AppDbContext db) : ControllerBase
         return Ok(plan);
     }
 
-    /// <summary>查询待处理保养提醒（Pending / Overdue）</summary>
+    /// <summary>查询保养提醒</summary>
+    /// <remarks>不传 status 时返回 Pending（待处理）/ Overdue（已逾期）；传 status（如 Completed）时按指定状态筛选。</remarks>
     [HttpGet("reminders/pending")]
     [ProducesResponseType(typeof(List<MaintenanceReminder>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> PendingReminders([FromQuery] int? workshopId)
+    public async Task<IActionResult> PendingReminders([FromQuery] int? workshopId, [FromQuery] string? status)
     {
         var q = db.MaintenanceReminders
             .Include(x => x.Equipment)
             .Include(x => x.Plan)
-            .Where(x => x.Status == "Pending" || x.Status == "Overdue");
+            .Include(x => x.CompletedBy)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(status))
+            q = q.Where(x => x.Status == status);
+        else
+            q = q.Where(x => x.Status == "Pending" || x.Status == "Overdue");
 
         if (workshopId.HasValue)
             q = q.Where(x => x.Equipment!.WorkshopId == workshopId);
@@ -77,5 +85,41 @@ public class AdminMaintenanceController(AppDbContext db) : ControllerBase
 
         await db.SaveChangesAsync();
         return Ok(new GenerateRemindersResult { Created = created });
+    }
+
+    /// <summary>完成保养提醒（标记完成并推进下次保养日期）</summary>
+    [HttpPost("reminders/{id}/complete")]
+    [ProducesResponseType(typeof(MaintenanceReminder), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CompleteReminder(int id)
+    {
+        var reminder = await db.MaintenanceReminders
+            .Include(x => x.Equipment)
+            .Include(x => x.Plan)
+            .FirstOrDefaultAsync(x => x.Id == id);
+        if (reminder is null)
+            return NotFound(new { message = "保养提醒不存在" });
+        if (reminder.Status == "Completed")
+            return BadRequest(new { message = "该保养提醒已完成，请勿重复操作" });
+
+        reminder.Status = "Completed";
+        reminder.CompletedAt = DateTime.UtcNow;
+        reminder.CompletedById = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        // 推进下次保养日期：从本次截止日往后推一个周期；若仍不晚于今天则继续推进（积压多期的情况）
+        if (reminder.Plan is { CycleDays: > 0 })
+        {
+            var today = DateTime.UtcNow.Date;
+            var next = reminder.DueDate.Date.AddDays(reminder.Plan.CycleDays);
+            while (next <= today)
+                next = next.AddDays(reminder.Plan.CycleDays);
+            reminder.Plan.NextDueDate = next;
+        }
+
+        await db.SaveChangesAsync();
+
+        await db.Entry(reminder).Reference(x => x.CompletedBy).LoadAsync();
+        return Ok(reminder);
     }
 }

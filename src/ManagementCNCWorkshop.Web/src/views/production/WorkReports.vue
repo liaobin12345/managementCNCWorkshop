@@ -32,6 +32,11 @@
       <el-table-column prop="qualifiedQty" label="合格" width="90" align="right" />
       <el-table-column prop="defectQty" label="不良" width="90" align="right" />
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
+      <el-table-column label="操作" width="80" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
     </el-table>
 
     <div class="pagination">
@@ -54,6 +59,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '../../api'
 import { formatDateTime } from '../../utils/format'
 
@@ -77,6 +83,25 @@ async function load() {
     total.value = res.total
   } finally {
     loading.value = false
+  }
+}
+
+async function onDelete(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除该报工记录？\n产品：${row.product?.name || '-'} · 员工：${row.employee?.name || '-'} · 数量：${row.quantity}\n删除后相关统计会自动重新计算。`,
+      '删除报工记录',
+      { type: 'error', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await adminApi.deleteWorkReport(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    /* http 层已提示 */
   }
 }
 

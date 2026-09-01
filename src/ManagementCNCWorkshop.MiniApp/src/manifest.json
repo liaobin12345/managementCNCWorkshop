@@ -44,7 +44,7 @@
     "title": "CNC 车间管理系统",
     "router": {
       "mode": "hash",
-      "base": "/"
+      "base": "/h5/"
     }
   }
 }

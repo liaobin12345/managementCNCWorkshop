@@ -2,6 +2,8 @@ import { get, post } from './request'
 
 // ── 认证 ──
 export const apiLogin = (data) => post('/auth/login', data)
+export const apiWechatLogin = (code) => post('/auth/wechat-login', { code })
+export const apiWechatBind = (data) => post('/auth/wechat-bind', data)
 
 // ── 基础查询 ──
 export const apiMe = () => get('/worker/me')
@@ -38,6 +40,7 @@ export const apiSaveEquipmentTime = (data) => post('/worker/equipment-time', dat
 // ── 保养 ──
 export const apiRemindersPending = (params) => get('/worker/maintenance/reminders/pending', params)
 export const apiMaintenancePlans = () => get('/worker/maintenance/plans')
+export const apiCompleteReminder = (id) => post(`/worker/maintenance/reminders/${id}/complete`)
 
 // ── 按设备统计 ──
 export const apiEquipmentDaily = (params) => get('/worker/stats/equipment/daily', params)
@@ -48,3 +51,10 @@ export const apiProcessCards = (params) => get('/worker/process/cards', params)
 export const apiProcessCardDetail = (id) => get(`/worker/process/cards/${id}`)
 export const apiAdvanceProcessCard = (id) => post(`/worker/process/cards/${id}/advance`)
 export const apiProcessCardProgress = (params) => get('/worker/process/progress', params)
+
+// ── 设备点检 ──
+export const apiInspectionTemplate = () => get('/worker/equipment-inspections/template')
+export const apiInspectionList = (params) => get('/worker/equipment-inspections', params)
+export const apiInspectionDetail = (id) => get(`/worker/equipment-inspections/${id}`)
+export const apiInspectionSubmit = (data) => post('/worker/equipment-inspections', data)
+export const apiInspectionReport = (params) => get('/worker/equipment-inspections/report', params)

@@ -28,6 +28,7 @@ public class AdminQualityController(AppDbContext db) : ControllerBase
             .Include(x => x.Product)
             .Include(x => x.Workshop)
             .Include(x => x.Inspector)
+            .Include(x => x.Equipment)
             .AsQueryable();
 
         if (date.HasValue)
@@ -42,6 +43,21 @@ public class AdminQualityController(AppDbContext db) : ControllerBase
             .ToListAsync();
 
         return Ok(new PagedResult<QualityRecord> { Total = total, Page = page, PageSize = pageSize, Items = items });
+    }
+
+    /// <summary>删除质检记录（纠错用，物理删除）</summary>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var record = await db.QualityRecords.FirstOrDefaultAsync(x => x.Id == id);
+        if (record is null)
+            return NotFound(new { message = "质检记录不存在" });
+
+        db.QualityRecords.Remove(record);
+        await db.SaveChangesAsync();
+        return Ok(new { message = "已删除" });
     }
 
     /// <summary>质量日统计</summary>

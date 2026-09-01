@@ -274,3 +274,25 @@ public class WorkerTrendPointDto
     /// <summary>不良数量</summary>
     public decimal DefectQty { get; set; }
 }
+
+/// <summary>更新员工请求体</summary>
+public class UpdateEmployeeRequest
+{
+    /// <summary>工号</summary>
+    public string EmployeeNo { get; set; } = string.Empty;
+
+    /// <summary>姓名</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>手机号</summary>
+    public string? Phone { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
+
+    /// <summary>角色：Admin 管理员 / Worker 操作工 / Inspector 质检员 / Programmer 编程技术员</summary>
+    public string Role { get; set; } = "Worker";
+
+    /// <summary>新密码（可选，传了则重置密码）</summary>
+    public string? Password { get; set; }
+}

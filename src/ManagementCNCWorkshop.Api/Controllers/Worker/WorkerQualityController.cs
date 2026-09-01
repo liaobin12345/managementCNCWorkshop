@@ -46,6 +46,14 @@ public class WorkerQualityController(AppDbContext db) : ControllerBase
             record.ProcessStepName = step.StepName;
         }
 
+        if (record.EquipmentId is > 0)
+        {
+            var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.Id == record.EquipmentId);
+            if (equipment is null) return BadRequest(new { message = "设备不存在" });
+            if (equipment.WorkshopId != record.WorkshopId)
+                return BadRequest(new { message = "所选设备不属于该车间" });
+        }
+
         db.QualityRecords.Add(record);
         await db.SaveChangesAsync();
         return Ok(record);

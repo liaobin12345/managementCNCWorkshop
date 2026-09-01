@@ -47,6 +47,10 @@ Thumbs.db
 ## npm cache
 .npm-cache/
 
+## node_modules
+node_modules/
+**/node_modules/
+
 ## Build output
 dist/
 publish/

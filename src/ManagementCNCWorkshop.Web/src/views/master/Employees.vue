@@ -25,9 +25,15 @@
         </template>
       </el-table-column>
       <el-table-column prop="workshop.name" label="所属车间" />
+      <el-table-column label="操作" width="140" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="新增员工" width="480px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑员工' : '新增员工'" width="480px">
       <el-form :model="form" label-width="90px">
         <el-form-item label="工号" required>
           <el-input v-model="form.employeeNo" placeholder="如 E004" />
@@ -51,7 +57,10 @@
             <el-radio value="Admin">管理员</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-alert type="info" :closable="false" title="初始密码固定为 123456，首次登录后建议修改" />
+        <el-form-item v-if="editingId" label="重置密码">
+          <el-input v-model="form.password" type="password" show-password placeholder="留空则不修改密码" />
+        </el-form-item>
+        <el-alert v-if="!editingId" type="info" :closable="false" title="初始密码固定为 123456，首次登录后建议修改" />
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -63,7 +72,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '../../api'
 import { roleLabel, roleType } from '../../utils/format'
 
@@ -72,6 +81,7 @@ const workshops = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const editingId = ref(null)
 const filterWorkshopId = ref(null)
 const filterRole = ref(null)
 
@@ -80,7 +90,8 @@ const form = reactive({
   name: '',
   phone: '',
   workshopId: null,
-  role: 'Worker'
+  role: 'Worker',
+  password: ''
 })
 
 async function load() {
@@ -96,7 +107,21 @@ async function load() {
 }
 
 function openCreate() {
-  Object.assign(form, { employeeNo: '', name: '', phone: '', workshopId: null, role: 'Worker' })
+  editingId.value = null
+  Object.assign(form, { employeeNo: '', name: '', phone: '', workshopId: null, role: 'Worker', password: '' })
+  dialogVisible.value = true
+}
+
+function openEdit(row) {
+  editingId.value = row.id
+  Object.assign(form, {
+    employeeNo: row.employeeNo,
+    name: row.name,
+    phone: row.phone,
+    workshopId: row.workshopId,
+    role: row.role,
+    password: ''
+  })
   dialogVisible.value = true
 }
 
@@ -105,12 +130,34 @@ async function onSubmit() {
   if (!form.workshopId) return ElMessage.warning('请选择所属车间')
   saving.value = true
   try {
-    await adminApi.createEmployee({ ...form })
+    if (editingId.value) {
+      const data = { ...form }
+      if (!data.password) delete data.password
+      await adminApi.updateEmployee(editingId.value, data)
+      ElMessage.success('保存成功')
+    } else {
+      await adminApi.createEmployee({ ...form })
+      ElMessage.success('新增成功，初始密码 123456')
+    }
     dialogVisible.value = false
-    ElMessage.success('新增成功，初始密码 123456')
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+async function onDelete(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除员工「${row.name}（${row.employeeNo}）」？`, '删除员工', { type: 'error' })
+  } catch {
+    return
+  }
+  try {
+    await adminApi.deleteEmployee(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    /* http 层已提示 */
   }
 }
 

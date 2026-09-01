@@ -21,6 +21,10 @@ public static class ReferenceValidator
         if (equipmentId.HasValue && !await db.Equipments.AnyAsync(x => x.Id == equipmentId))
             return $"设备 ID {equipmentId} 不存在，请先调用 GET /api/admin/master/equipments 查看可用 ID，或不传 equipmentId";
 
+        if (equipmentId.HasValue &&
+            await db.Equipments.AnyAsync(x => x.Id == equipmentId && x.WorkshopId != workshopId))
+            return "所选设备不属于该车间，请检查设备与车间是否匹配";
+
         return null;
     }
 

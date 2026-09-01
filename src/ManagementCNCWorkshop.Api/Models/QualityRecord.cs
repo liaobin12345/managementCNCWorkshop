@@ -39,6 +39,9 @@ public class QualityRecord
     /// <summary>工序名称快照</summary>
     public string? ProcessStepName { get; set; }
 
+    /// <summary>关联设备（可选）</summary>
+    public int? EquipmentId { get; set; }
+
     /// <summary>备注</summary>
     public string? Remark { get; set; }
 
@@ -53,4 +56,7 @@ public class QualityRecord
 
     /// <summary>关联工艺流转卡</summary>
     public ProcessCard? ProcessCard { get; set; }
+
+    /// <summary>关联设备</summary>
+    public Equipment? Equipment { get; set; }
 }
