@@ -60,3 +60,6 @@ appsettings.*.local.json
 *.db
 *.db-shm
 *.db-wal
+
+## 前端构建产物（勿入库）
+src/ManagementCNCWorkshop.Api/wwwroot/
