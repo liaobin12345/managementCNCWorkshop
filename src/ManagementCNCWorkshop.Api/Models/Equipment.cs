@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>CNC 设备</summary>
-public class Equipment
+public class Equipment : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }

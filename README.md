@@ -35,8 +35,10 @@ dotnet run --project src/ManagementCNCWorkshop.Api
 ### 2. 运营后台（Web）
 
 ```bash
+zsh scripts/start-web.sh    # 推荐：脚本自动加载项目自带 node/npm
+# 或手动：
 cd src/ManagementCNCWorkshop.Web
-npm install
+export PATH="/Users/liaobin/Desktop/cnc/.tools/bin:$PATH"   # 无全局 node 时必加
 npm run dev
 # 打开 http://localhost:5173
 ```
@@ -45,10 +47,49 @@ npm run dev
 
 ```bash
 cd src/ManagementCNCWorkshop.MiniApp
+export PATH="/Users/liaobin/Desktop/cnc/.tools/bin:$PATH"   # 无全局 node 时必加
 npm install
 npm run build:h5      # 构建 H5，产物在 dist/build/h5
 npm run build:mp-weixin  # 构建微信小程序，产物在 dist/build/mp-weixin
 ```
+
+---
+
+## 日常启动（三终端）+ 地址 / IP 说明
+
+> **核心结论：在自己电脑上开发调试，一律用 `localhost`，地址永远不会变。**
+> 「IP 一直不一样」只发生在手机真机联调时——电脑的局域网 IP 由路由器分配，换网络就可能变。
+
+### 每次开机启动 3 个终端
+
+| # | 终端命令（从仓库根目录 `~Desktop/cnc`） | 端口 | 说明 |
+|---|------|------|------|
+| 1 | `bash scripts/start-server.sh` | **5219** | 后端 API + 小程序 H5（后端托管 `/h5/`） |
+| 2 | `zsh scripts/start-web.sh` | **5173** | 运营后台（Web 管理端），脚本自动加载项目自带 node/npm，无需手动装 |
+| 3 | （改过小程序代码才需要）`zsh scripts/run-miniapp.sh build` | — | 重新构建小程序 H5，自动输出到后端 `wwwroot/h5/` |
+
+> 三个服务可以同时跑；改了后端代码需重启终端 1（或用 `zsh scripts/dev-api-watch.sh` 热重载）。
+
+> **⚠️ 没有全局 node/npm？** 本机未全局安装时，直接用 `zsh scripts/start-web.sh`（脚本自动使用项目自带工具链 `.tools/bin`）。`scripts/` 下的前端脚本（`run-miniapp.sh`、`start-web.sh`）都内置了这条 PATH 处理，不要手动裸跑 `npm run dev`，否则可能报 `command not found: npm`。
+
+### 访问地址对照表
+
+| 场景 | 地址 | IP 是否变化 |
+|------|------|------------|
+| 🖥️ 自己的电脑（日常开发） | 后端 `http://localhost:5219` · 运营后台 `http://localhost:5173` · 小程序 H5 `http://localhost:5219/h5/` | **永远不变** |
+| 📱 手机同 Wi-Fi（真机联调） | `http://电脑局域网IP:5219/h5/`、`http://电脑局域网IP:5173` | 会变，需要用当前 IP |
+| 🌍 外网访问（给客户演示） | cloudflared 隧道地址（`bash scripts/uat-expose.sh`） | 每次变化（临时 HTTPS 域名） |
+| 📱 微信开发者工具 | 先改 `MiniApp/src/config.js` 里的 IP 为当前电脑 IP，再 `zsh scripts/run-miniapp.sh mp-dev` | 会变，需同步修改 |
+
+### 查看电脑当前局域网 IP
+
+macOS：系统设置 → Wi-Fi → 详细信息（局域网地址，形如 `192.168.x.x`）。
+
+### 为什么地址会变 & 怎么应对
+
+- **`localhost` 永不变**：前端工程里已统一走 `localhost:5219`（Vite 代理 / H5 同源 `/api`），不需要在代码里写 IP。
+- **局域网 IP 会变**：由路由器 DHCP 分配，重启路由器或换 Wi-Fi 后可能不同；开发调试优先用电脑浏览器，把 IP 留给手机真机联调。
+- **隧道地址每次变**：cloudflared Quick Tunnel 是临时域名，脚本退出即失效，属正常现象。
 
 ## 演示账号
 

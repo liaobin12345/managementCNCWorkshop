@@ -41,8 +41,8 @@ public static class DbSeed
             );
 
             db.Products.AddRange(
-                new Product { Code = "P001", Name = "轴承座", Specification = "Φ50×80", QrCode = "PROD:P001" },
-                new Product { Code = "P002", Name = "法兰盘", Specification = "DN100", QrCode = "PROD:P002" }
+                new Product { WorkshopId = workshop.Id, Code = "P001", Name = "轴承座", Specification = "Φ50×80", QrCode = "PROD:P001" },
+                new Product { WorkshopId = workshop.Id, Code = "P002", Name = "法兰盘", Specification = "DN100", QrCode = "PROD:P002" }
             );
 
             var equipment = new Equipment
@@ -60,6 +60,7 @@ public static class DbSeed
             db.MaintenancePlans.Add(new MaintenancePlan
             {
                 EquipmentId = equipment.Id,
+                WorkshopId = workshop.Id,
                 PlanName = "月度润滑保养",
                 CycleDays = 30,
                 NextDueDate = DateTime.UtcNow.AddDays(5),
@@ -105,9 +106,9 @@ public static class DbSeed
 
             var demo = new[]
             {
-                new EquipmentTimeRecord { EquipmentId = equipmentId, RecordDate = today.AddDays(-2), SetupHours = 1.5m, RunningHours = 6m, IdleHours = 1m, EmployeeId = employeeId, Remark = "新程序首件调试" },
-                new EquipmentTimeRecord { EquipmentId = equipmentId, RecordDate = today.AddDays(-1), SetupHours = 0.5m, RunningHours = 7m, IdleHours = 0.5m, EmployeeId = employeeId, Remark = "正常生产" },
-                new EquipmentTimeRecord { EquipmentId = equipmentId, RecordDate = today, SetupHours = 0m, RunningHours = 3m, IdleHours = 1m, EmployeeId = employeeId, Remark = "上午班次" }
+                new EquipmentTimeRecord { EquipmentId = equipmentId, WorkshopId = db.Equipments.First(x => x.Id == equipmentId).WorkshopId, RecordDate = today.AddDays(-2), SetupHours = 1.5m, RunningHours = 6m, IdleHours = 1m, EmployeeId = employeeId, Remark = "新程序首件调试" },
+                new EquipmentTimeRecord { EquipmentId = equipmentId, WorkshopId = db.Equipments.First(x => x.Id == equipmentId).WorkshopId, RecordDate = today.AddDays(-1), SetupHours = 0.5m, RunningHours = 7m, IdleHours = 0.5m, EmployeeId = employeeId, Remark = "正常生产" },
+                new EquipmentTimeRecord { EquipmentId = equipmentId, WorkshopId = db.Equipments.First(x => x.Id == equipmentId).WorkshopId, RecordDate = today, SetupHours = 0m, RunningHours = 3m, IdleHours = 1m, EmployeeId = employeeId, Remark = "上午班次" }
             };
             db.EquipmentTimeRecords.AddRange(demo);
             db.SaveChanges();

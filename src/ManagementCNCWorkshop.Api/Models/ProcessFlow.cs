@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>工艺路线：工程师为产品设计的加工工艺流程</summary>
-public class ProcessFlow
+public class ProcessFlow : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
@@ -14,6 +14,9 @@ public class ProcessFlow
 
     /// <summary>对应产品 ID</summary>
     public int ProductId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>版本号（同一产品可有多版工艺，默认 1）</summary>
     public int Version { get; set; } = 1;
@@ -41,13 +44,16 @@ public class ProcessFlow
 }
 
 /// <summary>工序：工艺路线中的一道加工步骤</summary>
-public class ProcessStep
+public class ProcessStep : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>所属工艺路线 ID</summary>
     public int ProcessFlowId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>工序序号（从 1 开始，加工顺序）</summary>
     public int StepNo { get; set; }

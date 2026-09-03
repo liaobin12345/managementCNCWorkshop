@@ -26,6 +26,11 @@ public class AdminMaintenanceController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(MaintenancePlan), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreatePlan([FromBody] MaintenancePlan plan)
     {
+        var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.Id == plan.EquipmentId);
+        if (equipment is null)
+            return BadRequest(new { message = "设备不存在" });
+
+        plan.WorkshopId = equipment.WorkshopId;
         db.MaintenancePlans.Add(plan);
         await db.SaveChangesAsync();
         return Ok(plan);
@@ -76,6 +81,7 @@ public class AdminMaintenanceController(AppDbContext db) : ControllerBase
             {
                 PlanId = plan.Id,
                 EquipmentId = plan.EquipmentId,
+                WorkshopId = plan.WorkshopId,
                 DueDate = plan.NextDueDate,
                 RemindDate = remindDate,
                 Status = plan.NextDueDate.Date < today ? "Overdue" : "Pending"

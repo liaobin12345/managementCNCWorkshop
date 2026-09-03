@@ -1,13 +1,16 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>设备点检明细项（对应纸质点检表的每一项）</summary>
-public class EquipmentInspectionItem
+public class EquipmentInspectionItem : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>所属点检记录 ID</summary>
     public int InspectionId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>项序号（1~11）</summary>
     public int ItemNo { get; set; }

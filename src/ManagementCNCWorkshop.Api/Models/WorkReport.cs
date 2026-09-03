@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>扫码报工记录，产量统计的数据来源</summary>
-public class WorkReport
+public class WorkReport : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }

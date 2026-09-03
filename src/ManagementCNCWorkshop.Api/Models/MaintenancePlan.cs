@@ -1,13 +1,16 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>设备保养计划</summary>
-public class MaintenancePlan
+public class MaintenancePlan : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>关联设备 ID</summary>
     public int EquipmentId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>计划名称，如 月度润滑保养</summary>
     public string PlanName { get; set; } = string.Empty;

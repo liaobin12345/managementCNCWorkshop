@@ -1,13 +1,16 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>设备每日时间记录：调试时间 / 正常开机时间 / 待机时间（编程技术员/操作工按日录入）</summary>
-public class EquipmentTimeRecord
+public class EquipmentTimeRecord : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>设备 ID</summary>
     public int EquipmentId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>记录日期（某一天的用时，单位：小时）</summary>
     public DateTime RecordDate { get; set; }

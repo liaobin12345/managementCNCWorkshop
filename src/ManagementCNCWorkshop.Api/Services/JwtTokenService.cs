@@ -15,7 +15,8 @@ public class JwtTokenService(IConfiguration config)
         {
             new(ClaimTypes.NameIdentifier, employee.Id.ToString()),
             new(ClaimTypes.Name, employee.EmployeeNo),
-            new(ClaimTypes.GivenName, employee.Name)
+            new(ClaimTypes.GivenName, employee.Name),
+            new("WorkshopId", employee.WorkshopId.ToString())
         };
         foreach (var role in roles)
             claims.Add(new Claim(ClaimTypes.Role, role));

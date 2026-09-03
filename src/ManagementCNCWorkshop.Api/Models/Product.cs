@@ -1,10 +1,13 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>产品/零件</summary>
-public class Product
+public class Product : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>产品编码，唯一</summary>
     public string Code { get; set; } = string.Empty;

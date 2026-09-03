@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>质量检验记录，质量统计的数据来源</summary>
-public class QualityRecord
+public class QualityRecord : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }

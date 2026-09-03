@@ -5,6 +5,7 @@ using ManagementCNCWorkshop.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ManagementCNCWorkshop.Api.Controllers.Admin;
 
@@ -15,6 +16,13 @@ namespace ManagementCNCWorkshop.Api.Controllers.Admin;
 [Tags("运营后台-主数据")]
 public class AdminMasterController(AppDbContext db) : ControllerBase
 {
+    /// <summary>当前登录用户所属车间 ID（JWT 声明，用于默认归属）</summary>
+    private int CurrentUserWorkshopId() =>
+        int.TryParse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier), out var _)
+            && int.TryParse(User.FindFirstValue("WorkshopId"), out var wid)
+            ? wid
+            : 0;
+
     /// <summary>获取当前数据库中的主数据 ID（测试/联调用）</summary>
     [HttpGet("demo-info")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -102,13 +110,13 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         return Ok(await q.OrderBy(x => x.EmployeeNo).ToListAsync());
     }
 
-    /// <summary>新增员工（工号唯一，默认密码 123456）</summary>
+    /// <summary>新增员工（同车间内工号唯一，默认密码 123456）</summary>
     [HttpPost("employees")]
     [ProducesResponseType(typeof(Employee), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateEmployee([FromBody] Employee employee)
     {
-        if (await db.Employees.AnyAsync(x => x.EmployeeNo == employee.EmployeeNo))
-            return BadRequest(new { message = $"工号 {employee.EmployeeNo} 已存在" });
+        if (await db.Employees.AnyAsync(x => x.EmployeeNo == employee.EmployeeNo && x.WorkshopId == employee.WorkshopId))
+            return BadRequest(new { message = $"车间内工号 {employee.EmployeeNo} 已存在" });
 
         if (string.IsNullOrEmpty(employee.PasswordHash))
             employee.PasswordHash = PasswordHasher.Hash("123456");
@@ -127,8 +135,8 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         var employee = await db.Employees.FirstOrDefaultAsync(x => x.Id == id);
         if (employee is null)
             return NotFound(new { message = "员工不存在" });
-        if (await db.Employees.AnyAsync(x => x.EmployeeNo == input.EmployeeNo && x.Id != id))
-            return BadRequest(new { message = $"工号 {input.EmployeeNo} 已存在" });
+        if (await db.Employees.AnyAsync(x => x.EmployeeNo == input.EmployeeNo && x.WorkshopId == input.WorkshopId && x.Id != id))
+            return BadRequest(new { message = $"车间内工号 {input.EmployeeNo} 已存在" });
         if (input.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == input.WorkshopId))
             return BadRequest(new { message = "所选车间不存在" });
 
@@ -195,13 +203,16 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> Products() =>
         Ok(await db.Products.OrderBy(x => x.Code).ToListAsync());
 
-    /// <summary>新增产品</summary>
+    /// <summary>新增产品（未指定车间时默认归属当前用户所属车间）</summary>
     [HttpPost("products")]
     [ProducesResponseType(typeof(Product), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateProduct([FromBody] Product product)
     {
-        if (await db.Products.AnyAsync(x => x.Code == product.Code))
-            return BadRequest(new { message = $"产品编码 {product.Code} 已存在" });
+        if (product.WorkshopId <= 0)
+            product.WorkshopId = CurrentUserWorkshopId();
+
+        if (await db.Products.AnyAsync(x => x.Code == product.Code && x.WorkshopId == product.WorkshopId))
+            return BadRequest(new { message = $"车间内产品编码 {product.Code} 已存在" });
 
         db.Products.Add(product);
         await db.SaveChangesAsync();
@@ -218,7 +229,7 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         return product is null ? NotFound() : Ok(product);
     }
 
-    /// <summary>更新产品（含现场照片）</summary>
+    /// <summary>更新产品（含现场照片；未指定车间时保留原车间）</summary>
     [HttpPut("products/{id}")]
     [ProducesResponseType(typeof(Product), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -227,8 +238,8 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
         if (product is null)
             return NotFound(new { message = "产品不存在" });
-        if (await db.Products.AnyAsync(x => x.Code == input.Code && x.Id != id))
-            return BadRequest(new { message = $"产品编码 {input.Code} 已存在" });
+        if (await db.Products.AnyAsync(x => x.Code == input.Code && x.Id != id && x.WorkshopId == product.WorkshopId))
+            return BadRequest(new { message = $"车间内产品编码 {input.Code} 已存在" });
 
         product.Code = input.Code;
         product.Name = input.Name;
@@ -286,10 +297,11 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(Equipment), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateEquipment([FromBody] Equipment equipment)
     {
-        if (await db.Equipments.AnyAsync(x => x.Code == equipment.Code))
-            return BadRequest(new { message = $"设备编码 {equipment.Code} 已存在" });
         if (equipment.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == equipment.WorkshopId))
             return BadRequest(new { message = "所选车间不存在" });
+
+        if (await db.Equipments.AnyAsync(x => x.Code == equipment.Code && x.WorkshopId == equipment.WorkshopId))
+            return BadRequest(new { message = $"车间内设备编码 {equipment.Code} 已存在" });
 
         db.Equipments.Add(equipment);
         await db.SaveChangesAsync();
@@ -315,8 +327,8 @@ public class AdminMasterController(AppDbContext db) : ControllerBase
         var equipment = await db.Equipments.FirstOrDefaultAsync(x => x.Id == id);
         if (equipment is null)
             return NotFound(new { message = "设备不存在" });
-        if (await db.Equipments.AnyAsync(x => x.Code == input.Code && x.Id != id))
-            return BadRequest(new { message = $"设备编码 {input.Code} 已存在" });
+        if (await db.Equipments.AnyAsync(x => x.Code == input.Code && x.WorkshopId == input.WorkshopId && x.Id != id))
+            return BadRequest(new { message = $"车间内设备编码 {input.Code} 已存在" });
         if (input.WorkshopId <= 0 || !await db.Workshops.AnyAsync(x => x.Id == input.WorkshopId))
             return BadRequest(new { message = "所选车间不存在" });
 

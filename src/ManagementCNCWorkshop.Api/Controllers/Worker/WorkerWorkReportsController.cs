@@ -14,7 +14,7 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 [Route("api/worker/work-reports")]
 [Authorize(Roles = "Worker,Inspector,Programmer,Admin")]
 [Tags("工人端-扫码报工")]
-public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
+public class WorkerWorkReportsController(AppDbContext db, TenantContext tenant) : ControllerBase
 {
     /// <summary>扫码报工</summary>
     /// <remarks>
@@ -34,8 +34,11 @@ public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
         // 0 不是有效外键，当作未选设备
         var equipmentId = req.EquipmentId is > 0 ? req.EquipmentId : null;
 
+        // 租户用户强制归属当前车间（防止跨车间写入）；管理员按请求指定
+        var workshopId = tenant.WorkshopId ?? req.WorkshopId;
+
         var error = await ReferenceValidator.ValidateWorkReportAsync(
-            db, req.ProductId, req.WorkshopId, employeeId, equipmentId);
+            db, req.ProductId, workshopId, employeeId, equipmentId);
         if (error is not null)
             return BadRequest(new { message = error });
 
@@ -65,7 +68,7 @@ public class WorkerWorkReportsController(AppDbContext db) : ControllerBase
         var report = new WorkReport
         {
             ProductId = req.ProductId,
-            WorkshopId = req.WorkshopId,
+            WorkshopId = workshopId,
             EmployeeId = employeeId,
             EquipmentId = equipmentId,
             ReportDate = req.ReportDate ?? DateTime.UtcNow,

@@ -108,6 +108,7 @@ public class WorkerEquipmentInspectionController(AppDbContext db) : ControllerBa
             record = new EquipmentInspection
             {
                 EquipmentId = equipment.Id,
+                WorkshopId = equipment.WorkshopId,
                 InspectDate = date,
                 Shift = shift,
                 InspectorId = CurrentEmployeeId,
@@ -131,6 +132,7 @@ public class WorkerEquipmentInspectionController(AppDbContext db) : ControllerBa
         {
             record.Items.Add(new EquipmentInspectionItem
             {
+                WorkshopId = equipment.WorkshopId,
                 ItemNo = no,
                 ItemName = name,
                 Status = submitted.TryGetValue(no, out var s) ? s : "Ok",

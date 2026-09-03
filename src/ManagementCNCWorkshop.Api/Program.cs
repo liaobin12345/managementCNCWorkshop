@@ -88,6 +88,9 @@ var connString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("缺少配置 ConnectionStrings:DefaultConnection");
 Console.WriteLine($"[数据库] Provider={dbProvider}");
 
+// --- 多租户上下文（从 JWT 的 WorkshopId 声明解析当前车间） ---
+builder.Services.AddScoped<TenantContext>();
+
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (dbProvider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
@@ -95,6 +98,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     else
         options.UseSqlite(connString);
 });
+// 覆盖默认注册：让 AppDbContext 注入请求级的 TenantContext（覆盖 AddDbContext 默认的无参租户构造）
+builder.Services.AddScoped<AppDbContext>(sp => new AppDbContext(
+    sp.GetRequiredService<DbContextOptions<AppDbContext>>(),
+    sp.GetRequiredService<TenantContext>()));
 
 // --- JWT 认证 ---
 var jwtSecret = builder.Configuration["Jwt:Secret"]
@@ -150,6 +157,10 @@ using (var scope = app.Services.CreateScope())
         await EnsureMySqlColumnAsync(connString, "MaintenanceReminders", "CompletedById", "int NULL");
         await EnsureMySqlColumnAsync(connString, "MaintenanceReminders", "CompletedAt", "datetime(6) NULL");
         await EnsureMySqlInspectionTablesAsync(connString);
+
+        // 多租户：为历史库补充 WorkshopId 列
+        await EnsureMySqlTenantColumnsAsync(connString);
+        await EnsureMySqlTenantIndexesAsync(connString);
     }
     else
     {
@@ -170,8 +181,15 @@ using (var scope = app.Services.CreateScope())
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepNo");
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepName");
             await EnsureSqliteInspectionTablesAsync(sqlitePath);
+
+            // 多租户：为历史库补充 WorkshopId 列
+            await EnsureSqliteTenantColumnsAsync(sqlitePath);
+            await EnsureSqliteTenantIndexesAsync(sqlitePath);
         }
     }
+
+    // 多租户：历史数据回填到第一个车间（老库是单车间部署）
+    await BackfillTenantWorkshopIdsAsync(db);
 
     DbSeed.Seed(db);
 }
@@ -189,6 +207,15 @@ app.UseStaticFiles();
 
 app.UseCors();
 app.UseAuthentication();
+
+// 多租户：从 JWT 声明解析当前车间（未登录时不设置，全局过滤器不生效，用于登录/种子场景）
+app.Use(async (context, next) =>
+{
+    var tenant = context.RequestServices.GetRequiredService<TenantContext>();
+    tenant.LoadFromClaims(context.User);
+    await next();
+});
+
 app.UseAuthorization();
 app.MapControllers();
 
@@ -227,9 +254,17 @@ static async Task MigrateSqliteToMySqlAsync(string contentRoot, IConfiguration c
     var optionsSqlite = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={sqlitePath}").Options;
     var optionsMySql = new DbContextOptionsBuilder<AppDbContext>().UseMySql(mysqlConn, ServerVersion.AutoDetect(mysqlConn)).Options;
 
-    // 旧 SQLite 库可能没有模型新增的 ImageUrl 列，先补上
+    // 旧 SQLite 库可能没有模型新增的列，先补上（含多租户 WorkshopId 列与车间内唯一索引）
     await EnsureColumnAsync(sqlitePath, "Products", "ImageUrl");
     await EnsureColumnAsync(sqlitePath, "Equipments", "ImageUrl");
+    await EnsureSqliteTenantColumnsAsync(sqlitePath);
+    await EnsureSqliteTenantIndexesAsync(sqlitePath);
+
+    // 回填旧数据的 WorkshopId 到第一个车间（单车间老库）
+    await using (var sqliteBackfill = new AppDbContext(optionsSqlite))
+    {
+        await BackfillTenantWorkshopIdsAsync(sqliteBackfill);
+    }
 
     await CreateDatabaseIfNotExistsAsync(mysqlConn);
 
@@ -779,4 +814,120 @@ CREATE TABLE IF NOT EXISTS EquipmentInspectionItems (
   CONSTRAINT FK_EquipmentInspectionItems_EquipmentInspections_InspectionId FOREIGN KEY (InspectionId) REFERENCES EquipmentInspections (Id) ON DELETE CASCADE
 );
 CREATE INDEX IX_EquipmentInspectionItems_InspectionId_ItemNo ON EquipmentInspectionItems (InspectionId, ItemNo);");
+}
+
+// ─────────────────── 多租户（车间）兼容 ───────────────────
+
+/// <summary>需要按车间隔离的表清单（已有 WorkshopId 列的表不需要在此处理）</summary>
+static string[] TenantTables() => new[]
+{
+    "Products",
+    "MaintenancePlans",
+    "MaintenanceReminders",
+    "ProcessFlows",
+    "ProcessSteps",
+    "ProcessCards",
+    "ProcessCardSteps",
+    "EquipmentTimeRecords",
+    "EquipmentInspections",
+    "EquipmentInspectionItems"
+};
+
+/// <summary>MySQL：为历史表补充 WorkshopId 列（新库由 EnsureCreated 直接创建，无需处理）</summary>
+static async Task EnsureMySqlTenantColumnsAsync(string mysqlConn)
+{
+    foreach (var table in TenantTables())
+        await EnsureMySqlColumnAsync(mysqlConn, table, "WorkshopId", "int NOT NULL DEFAULT 0");
+}
+
+/// <summary>SQLite：为历史表补充 WorkshopId 列</summary>
+static async Task EnsureSqliteTenantColumnsAsync(string sqlitePath)
+{
+    foreach (var table in TenantTables())
+        await EnsureColumnAsync(sqlitePath, table, "WorkshopId");
+}
+
+/// <summary>历史数据回填：老库是单车间部署，把 WorkshopId 为空或 0 的数据归到第一个车间</summary>
+static async Task BackfillTenantWorkshopIdsAsync(AppDbContext db)
+{
+    var firstWorkshopId = await db.Workshops.OrderBy(x => x.Id).Select(x => (int?)x.Id).FirstOrDefaultAsync();
+    if (firstWorkshopId is null) return;
+
+    foreach (var table in TenantTables())
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            $"UPDATE `{table}` SET `WorkshopId` = {firstWorkshopId} WHERE `WorkshopId` IS NULL OR `WorkshopId` = 0");
+    }
+    Console.WriteLine($"  [多租户] 历史数据已回填到车间 {firstWorkshopId}");
+}
+
+/// <summary>需要从全局唯一改为车间内唯一的（表, 旧索引名, 新索引列）</summary>
+static (string Table, string OldIndex, string NewIndex, string Column)[] TenantUniqueIndexes() => new[]
+{
+    ("Employees", "IX_Employees_EmployeeNo", "IX_Employees_WorkshopId_EmployeeNo", "EmployeeNo"),
+    ("Products", "IX_Products_Code", "IX_Products_WorkshopId_Code", "Code"),
+    ("Equipments", "IX_Equipments_Code", "IX_Equipments_WorkshopId_Code", "Code"),
+    ("ProcessFlows", "IX_ProcessFlows_Code", "IX_ProcessFlows_WorkshopId_Code", "Code"),
+    ("ProcessCards", "IX_ProcessCards_Code", "IX_ProcessCards_WorkshopId_Code", "Code")
+};
+
+/// <summary>MySQL：把全局唯一索引迁移为车间内唯一（老库可能已存在旧索引）</summary>
+static async Task EnsureMySqlTenantIndexesAsync(string mysqlConn)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    foreach (var (table, oldIndex, newIndex, column) in TenantUniqueIndexes())
+    {
+        // 删除旧全局唯一索引
+        await using var checkOld = conn.CreateCommand();
+        checkOld.CommandText =
+            $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS " +
+            $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND INDEX_NAME = '{oldIndex}'";
+        if (Convert.ToInt32(await checkOld.ExecuteScalarAsync()) > 0)
+        {
+            await using var drop = conn.CreateCommand();
+            drop.CommandText = $"ALTER TABLE `{table}` DROP INDEX `{oldIndex}`";
+            await drop.ExecuteNonQueryAsync();
+            Console.WriteLine($"  MySQL 表 {table} 已删除旧唯一索引 {oldIndex}");
+        }
+
+        // 建立车间内唯一索引（若不存在）
+        await using var checkNew = conn.CreateCommand();
+        checkNew.CommandText =
+            $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS " +
+            $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND INDEX_NAME = '{newIndex}'";
+        if (Convert.ToInt32(await checkNew.ExecuteScalarAsync()) == 0)
+        {
+            await using var create = conn.CreateCommand();
+            create.CommandText = $"CREATE UNIQUE INDEX `{newIndex}` ON `{table}` (`WorkshopId`, `{column}`)";
+            await create.ExecuteNonQueryAsync();
+            Console.WriteLine($"  MySQL 表 {table} 已建立车间内唯一索引 {newIndex}");
+        }
+    }
+}
+
+/// <summary>SQLite：把全局唯一索引迁移为车间内唯一</summary>
+static async Task EnsureSqliteTenantIndexesAsync(string sqlitePath)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    foreach (var (table, oldIndex, newIndex, column) in TenantUniqueIndexes())
+    {
+        // SQLite 老索引名（EF Core 生成：IX_{Table}_{Column}）
+        await using var drop = conn.CreateCommand();
+        drop.CommandText = $"DROP INDEX IF EXISTS `{oldIndex}`";
+        await drop.ExecuteNonQueryAsync();
+
+        await using var checkNew = conn.CreateCommand();
+        checkNew.CommandText = $"SELECT name FROM sqlite_master WHERE type='index' AND name='{newIndex}'";
+        if (await checkNew.ExecuteScalarAsync() is null)
+        {
+            await using var create = conn.CreateCommand();
+            create.CommandText = $"CREATE UNIQUE INDEX `{newIndex}` ON `{table}` (`WorkshopId`, `{column}`)";
+            await create.ExecuteNonQueryAsync();
+            Console.WriteLine($"  SQLite 表 {table} 已建立车间内唯一索引 {newIndex}");
+        }
+    }
 }

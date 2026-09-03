@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>员工（操作工、质检员、管理员，预留微信登录）</summary>
-public class Employee
+public class Employee : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }

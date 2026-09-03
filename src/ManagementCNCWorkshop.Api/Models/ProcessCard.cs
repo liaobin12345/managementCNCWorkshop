@@ -1,7 +1,7 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>工艺流转卡：按工艺路线生成的批次加工流转凭证，贯穿整个加工环节</summary>
-public class ProcessCard
+public class ProcessCard : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
@@ -33,6 +33,9 @@ public class ProcessCard
     /// <summary>创建人（员工 ID）</summary>
     public int? CreatedById { get; set; }
 
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
+
     /// <summary>创建时间</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -59,13 +62,16 @@ public class ProcessCard
 }
 
 /// <summary>流转卡工序执行记录：每道工序的实际执行状态</summary>
-public class ProcessCardStep
+public class ProcessCardStep : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>流转卡 ID</summary>
     public int ProcessCardId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>工序序号</summary>
     public int StepNo { get; set; }

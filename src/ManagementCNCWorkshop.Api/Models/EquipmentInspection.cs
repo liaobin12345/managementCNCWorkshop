@@ -1,13 +1,16 @@
 namespace ManagementCNCWorkshop.Api.Models;
 
 /// <summary>设备点检记录（一台设备·一天·一个班次一条）</summary>
-public class EquipmentInspection
+public class EquipmentInspection : ITenantScoped
 {
     /// <summary>主键 ID</summary>
     public int Id { get; set; }
 
     /// <summary>设备 ID</summary>
     public int EquipmentId { get; set; }
+
+    /// <summary>所属车间 ID</summary>
+    public int WorkshopId { get; set; }
 
     /// <summary>点检日期（取日期部分）</summary>
     public DateTime InspectDate { get; set; }

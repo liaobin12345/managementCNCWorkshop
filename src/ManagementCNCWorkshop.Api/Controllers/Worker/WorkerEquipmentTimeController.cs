@@ -72,6 +72,7 @@ public class WorkerEquipmentTimeController(AppDbContext db) : ControllerBase
             record = new EquipmentTimeRecord
             {
                 EquipmentId = req.EquipmentId,
+                WorkshopId = equipment.WorkshopId,
                 RecordDate = day,
                 SetupHours = req.SetupHours,
                 RunningHours = req.RunningHours,

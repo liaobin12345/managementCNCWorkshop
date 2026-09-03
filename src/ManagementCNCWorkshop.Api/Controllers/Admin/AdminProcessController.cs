@@ -61,7 +61,11 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
         if (req.Steps.Count == 0)
             return BadRequest(new { message = "至少需要一道工序" });
 
-        if (await db.ProcessFlows.AnyAsync(x => x.Code == req.Code))
+        var flowWorkshopId = await GetProductWorkshopIdAsync(req.ProductId);
+        if (flowWorkshopId <= 0)
+            return BadRequest(new { message = "所选产品不存在，请先维护产品" });
+
+        if (await db.ProcessFlows.AnyAsync(x => x.Code == req.Code && x.WorkshopId == flowWorkshopId))
             return BadRequest(new { message = $"工艺编号 {req.Code} 已存在" });
 
         var flow = new ProcessFlow
@@ -69,6 +73,7 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
             Code = string.IsNullOrWhiteSpace(req.Code) ? await NextFlowCodeAsync(req.ProductId) : req.Code.Trim(),
             Name = req.Name.Trim(),
             ProductId = req.ProductId,
+            WorkshopId = flowWorkshopId,
             Description = req.Description,
             CreatedById = req.CreatedById,
             Status = "Draft"
@@ -83,7 +88,9 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
 
         foreach (var s in req.Steps.OrderBy(x => x.StepNo))
         {
-            flow.Steps.Add(ToStep(s));
+            var step = ToStep(s);
+            step.WorkshopId = flow.WorkshopId;
+            flow.Steps.Add(step);
         }
 
         db.ProcessFlows.Add(flow);
@@ -102,6 +109,10 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
             .FirstOrDefaultAsync(x => x.Id == id);
         if (flow is null) return NotFound(new { message = "工艺路线不存在" });
 
+        var flowWorkshopId = await GetProductWorkshopIdAsync(req.ProductId);
+        if (flowWorkshopId <= 0)
+            return BadRequest(new { message = "所选产品不存在，请先维护产品" });
+
         var usedByCards = await db.ProcessCards.AnyAsync(x => x.ProcessFlowId == id);
         if (flow.Status == "Active" && usedByCards)
             return BadRequest(new { message = "已发布的工艺路线已用于流转卡，不能修改；请创建新版工艺" });
@@ -111,19 +122,24 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
         if (req.Steps.Count == 0)
             return BadRequest(new { message = "至少需要一道工序" });
 
-        var codeExists = await db.ProcessFlows.AnyAsync(x => x.Code == req.Code && x.Id != id);
+        var codeExists = await db.ProcessFlows.AnyAsync(x => x.Code == req.Code && x.WorkshopId == flowWorkshopId && x.Id != id);
         if (codeExists)
             return BadRequest(new { message = $"工艺编号 {req.Code} 已存在" });
 
         flow.Code = string.IsNullOrWhiteSpace(req.Code) ? flow.Code : req.Code.Trim();
         flow.Name = req.Name.Trim();
         flow.ProductId = req.ProductId;
+        flow.WorkshopId = flowWorkshopId;
         flow.Description = req.Description;
 
         // 全量替换工序
         db.ProcessSteps.RemoveRange(flow.Steps);
         foreach (var s in req.Steps.OrderBy(x => x.StepNo))
-            flow.Steps.Add(ToStep(s));
+        {
+            var step = ToStep(s);
+            step.WorkshopId = flow.WorkshopId;
+            flow.Steps.Add(step);
+        }
 
         await db.SaveChangesAsync();
         return await FlowDetail(flow.Id);
@@ -282,6 +298,7 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
             Code = await NextCardCodeAsync(),
             ProcessFlowId = flow.Id,
             ProductId = flow.ProductId,
+            WorkshopId = flow.WorkshopId,
             Quantity = req.Quantity,
             MaterialSpec = req.MaterialSpec,
             SurfaceTreatment = req.SurfaceTreatment,
@@ -297,6 +314,7 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
         {
             card.CardSteps.Add(new ProcessCardStep
             {
+                WorkshopId = flow.WorkshopId,
                 StepNo = step.StepNo,
                 StepName = step.Name,
                 Status = "Pending"
@@ -577,6 +595,15 @@ public class AdminProcessController(AppDbContext db) : ControllerBase
         var prefix = $"GY-{product?.Code ?? "P"}";
         var count = await db.ProcessFlows.CountAsync(x => x.Code.StartsWith(prefix + "-")) + 1;
         return $"{prefix}-{count:00}";
+    }
+
+    /// <summary>查询产品所属车间（工艺路线必须归属产品所在车间）</summary>
+    private async Task<int> GetProductWorkshopIdAsync(int productId)
+    {
+        var product = await db.Products.AsNoTracking().FirstOrDefaultAsync(x => x.Id == productId);
+        if (product is null || product.WorkshopId <= 0)
+            return 0;
+        return product.WorkshopId;
     }
 
     private async Task<string> NextCardCodeAsync()

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ManagementCNCWorkshop.Api.Data;
 using ManagementCNCWorkshop.Api.Models;
 using ManagementCNCWorkshop.Api.Models.Dtos;
+using ManagementCNCWorkshop.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,8 +14,9 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 [Route("api/worker")]
 [Authorize(Roles = "Worker,Inspector,Programmer,Admin")]
 [Tags("工人端-查询")]
-public class WorkerQueryController(AppDbContext db) : ControllerBase
+public class WorkerQueryController(AppDbContext db, TenantContext tenant) : ControllerBase
 {
+    private TenantContext _tenant => tenant;
     /// <summary>获取当前登录用户信息</summary>
     [HttpGet("me")]
     [ProducesResponseType(typeof(AuthUserDto), StatusCodes.Status200OK)]
@@ -36,11 +38,16 @@ public class WorkerQueryController(AppDbContext db) : ControllerBase
         });
     }
 
-    /// <summary>车间列表（报工下拉选择用）</summary>
+    /// <summary>车间列表（报工下拉选择用；租户用户只返回自己车间，管理员返回全部）</summary>
     [HttpGet("workshops")]
     [ProducesResponseType(typeof(List<Workshop>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Workshops() =>
-        Ok(await db.Workshops.OrderBy(x => x.Code).ToListAsync());
+    public async Task<IActionResult> Workshops()
+    {
+        var q = db.Workshops.AsQueryable();
+        if (_tenant.WorkshopId is int wid)
+            q = q.Where(x => x.Id == wid);
+        return Ok(await q.OrderBy(x => x.Code).ToListAsync());
+    }
 
     /// <summary>产品列表（扫码失败时手动选择）</summary>
     [HttpGet("products")]

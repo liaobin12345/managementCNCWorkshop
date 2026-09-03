@@ -13,7 +13,7 @@ namespace ManagementCNCWorkshop.Api.Controllers.Worker;
 [Route("api/worker/quality")]
 [Authorize(Roles = "Inspector,Programmer,Admin")]
 [Tags("工人端-质检")]
-public class WorkerQualityController(AppDbContext db) : ControllerBase
+public class WorkerQualityController(AppDbContext db, TenantContext tenant) : ControllerBase
 {
     /// <summary>录入质检记录</summary>
     /// <remarks>未传 inspectorId 时默认取当前登录质检员。</remarks>
@@ -25,6 +25,9 @@ public class WorkerQualityController(AppDbContext db) : ControllerBase
         var inspectorId = record.InspectorId > 0
             ? record.InspectorId
             : int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        // 租户用户强制归属当前车间（防止跨车间写入）；管理员按请求指定
+        record.WorkshopId = tenant.WorkshopId ?? record.WorkshopId;
 
         var error = await ReferenceValidator.ValidateQualityRecordAsync(
             db, record.ProductId, record.WorkshopId, inspectorId);
