@@ -97,24 +97,56 @@ public class FanucProgramGenerator
         var backTh = threadPts.Where(x => x.Z < boundaryZ)
             .Select(x => new ThreadOp(x.X, x.ThreadPitch ?? 1.5m, zLast - x.Z)).ToList();
 
-        var gripDia = front[0].X;
         var totalLen = prof[0].Z - zLast;
 
-        var frontSb = new StringBuilder();
-        frontSb.AppendLine("(========== PROGRAM 1 OF 2 - FRONT SIDE ==========)");
-        frontSb.AppendLine("(CLAMP: GRIP STOCK OD - MACHINING RIGHT SIDE FIRST)");
-        frontSb.AppendLine($"(SCOPE: RIGHT FACE Z0 + OD FROM Z0 TO Z{FmtZ(front[^1].Z)})");
-        frontSb.AppendLine("(DATUM: Z0 = RIGHT END FACE)");
-        frontSb.Append(Body(p, front, frontTh, no1, 1));
+        // 夹位先车：比较两侧外端光洁圆柱段长度，长的一侧先车，
+        // 第二道夹这段圆柱（翻面装夹稳定，避开斜坡/圆弧过渡区）
+        static decimal OuterCylLen(List<Pt> side)
+        {
+            var len = 0m;
+            for (var i = 1; i < side.Count; i++)
+            {
+                if (side[i].X != side[0].X || side[i].R is not null) break;
+                len = side[i].Z - side[0].Z;
+            }
+            return Math.Abs(len);
+        }
 
-        var backSb = new StringBuilder();
-        backSb.AppendLine("(========== PROGRAM 2 OF 2 - BACK SIDE ==========)");
-        backSb.AppendLine($"(CLAMP: GRIP FINISHED DIA {FmtDia(gripDia)} WITH COPPER SHIM)");
-        backSb.AppendLine($"(SCOPE: BACK FACE TO TOTAL LEN {FmtZ(totalLen)} + OD DIA {FmtDia(back.Max(x => x.X))})");
-        backSb.AppendLine($"(DATUM: Z0 = NEW RIGHT FACE AFTER FACING, TOTAL LEN {FmtZ(totalLen)})");
-        backSb.Append(Body(p, back, backTh, no1 + 1, 2));
+        var backFirst = OuterCylLen(back) > OuterCylLen(front);
 
-        return new[] { frontSb.ToString(), backSb.ToString() };
+        List<Pt> firstSide, secondSide;
+        List<ThreadOp> firstThreads, secondThreads;
+        string firstName, secondName;
+        if (backFirst)
+        {
+            firstSide = back; firstThreads = backTh; firstName = "BACK";
+            secondSide = front; secondThreads = frontTh; secondName = "FRONT";
+        }
+        else
+        {
+            firstSide = front; firstThreads = frontTh; firstName = "FRONT";
+            secondSide = back; secondThreads = backTh; secondName = "BACK";
+        }
+
+        var gripDia = firstSide[0].X;
+        var stickout = Math.Abs(firstSide[^1].Z - firstSide[0].Z) + 5m;
+
+        var firstSb = new StringBuilder();
+        firstSb.AppendLine($"(========== PROGRAM 1 OF 2 - {firstName} SIDE ==========)");
+        firstSb.AppendLine($"(CLAMP: GRIP STOCK DIA {FmtDia(p.StockDia ?? secondSide.Max(x => x.X) + 4)} - MACHINE THIS END FIRST)");
+        firstSb.AppendLine($"(STICKOUT: >= {FmtZ(stickout)} FROM CHUCK FACE)");
+        firstSb.AppendLine($"(SCOPE: THIS END FACE Z0 + OD TO Z{FmtZ(firstSide[^1].Z)})");
+        firstSb.AppendLine("(DATUM: Z0 = THIS END FACE)");
+        firstSb.Append(Body(p, firstSide, firstThreads, no1, 1));
+
+        var secondSb = new StringBuilder();
+        secondSb.AppendLine($"(========== PROGRAM 2 OF 2 - {secondName} SIDE ==========)");
+        secondSb.AppendLine($"(CLAMP: GRIP FINISHED DIA {FmtDia(gripDia)} WITH COPPER SHIM)");
+        secondSb.AppendLine($"(SCOPE: OTHER END FACE TO TOTAL LEN {FmtZ(totalLen)} + OD DIA {FmtDia(secondSide.Max(x => x.X))})");
+        secondSb.AppendLine($"(DATUM: Z0 = NEW RIGHT FACE AFTER FACING, TOTAL LEN {FmtZ(totalLen)})");
+        secondSb.Append(Body(p, secondSide, secondThreads, no1 + 1, 2));
+
+        return new[] { firstSb.ToString(), secondSb.ToString() };
     }
 
     public string Generate(CncProgram p, IReadOnlyList<CncContourPoint> points) =>
@@ -159,7 +191,9 @@ public class FanucProgramGenerator
         var faceAllowance = 0.1m;
         var controlSystem = string.IsNullOrWhiteSpace(p.ControlSystem) ? "FANUC" : p.ControlSystem.Trim();
 
-        var plan = BuildPlan(prof, threads, c, roughFeed, finishFeed);
+        // 翻面分界延伸仅在"先车侧 + 棒料大于轮廓终点直径"时生效
+        var stubDia = sideNo == 1 && stockDia > prof[^1].X + UndercutEps ? stockDia : 0m;
+        var plan = BuildPlan(prof, threads, c, roughFeed, finishFeed, stubDia);
         var sb = new StringBuilder();
 
         sb.AppendLine($"O{progNo:D4}");
@@ -249,17 +283,7 @@ public class FanucProgramGenerator
                 sb.AppendLine(line);
             sb.AppendLine("G01 U0.1 W-0.5"); // 末端赶毛刺：出刀时斜向赶掉接刀毛刺
             sb.AppendLine($"G00 X{FmtDia(finishClearX)}");
-            // 两次加工：正面程序在分界处给棒料外圆棱边倒角，翻面搬运不刮手
-            if (sideNo == 1 && stockDia > prof[^1].X + UndercutEps)
-            {
-                var endZ = prof[^1].Z;
-                sb.AppendLine($"G00 Z{FmtZ(endZ + 2)}");
-                sb.AppendLine($"G00 X{FmtDia(faceX)}");
-                sb.AppendLine($"G00 Z{FmtZ(endZ)}");
-                sb.AppendLine($"G01 X{FmtDia(stockDia - 2 * c)} F{finishFeed:0.##}");
-                sb.AppendLine($"G01 X{FmtDia(stockDia)} Z{FmtZ(endZ - c)} F0.03");
-                sb.AppendLine($"G00 X{FmtDia(faceX)}");
-            }
+            // 先车侧的边界倒角已并入粗车路径，精车段只收光，不再重复吃大料
             sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZ)}" : $"G00 Z{FmtZ(10m)}");
             sb.AppendLine();
             op++;
@@ -293,7 +317,7 @@ public class FanucProgramGenerator
     // ───────────── 工艺分段 + 路径生成 ─────────────
 
     private static Plan BuildPlan(List<Pt> prof, List<ThreadOp> threads, decimal c,
-        decimal roughFeed, decimal finishFeed)
+        decimal roughFeed, decimal finishFeed, decimal stubStockDia)
     {
         var plan = new Plan();
         plan.Threads.AddRange(threads);
@@ -304,9 +328,21 @@ public class FanucProgramGenerator
         // ── G71 粗车轮廓：净形状、跨槽直线连接（不加倒角）。
         //    含窄槽 → 首块带 X+Z（Type II，容忍槽的下切）；纯单调轮廓 → Type I，兼容更老的系统。
         var profileMoves = new List<string>(); // j=1..n-1 的轮廓移动（供粗车/精车共用判断）
+        var roughExtras = new List<string>();  // 粗车必须先车到位的延伸段
         var wps = new List<Pt>(); // 精车路径点（跨槽处标记 Hop）
         var prev = p0;
         var hasDip = false;
+
+        // 翻面分界粗车延伸（粗车 Z 轴要比精车长）：终点直径多车 0.5 进棒料区，
+        // 并给棒料棱边倒角——精车倒角/收光只吃 U0.25 余量，不再扎进未粗车的生料
+        if (stubStockDia > 0 && stubStockDia > prof[^1].X + UndercutEps)
+        {
+            var end = prof[^1];
+            var stubZ = end.Z - 0.5m;
+            roughExtras.Add($"G01 Z{FmtZ(stubZ)}");
+            roughExtras.Add($"G01 X{FmtDia(stubStockDia - 2 * c)}");
+            roughExtras.Add($"G01 X{FmtDia(stubStockDia)} Z{FmtZ(stubZ - c)}");
+        }
 
         // 精车起点：端面棱边倒角（给进贴面到端面上方 0.05 → 45° 落到轮廓）。
         // 靠近工件一律给进逼近：快移直落 Z0 有让刀/超程扎端面的风险。
@@ -386,8 +422,15 @@ public class FanucProgramGenerator
             plan.Rough.Add($"G01 Z{FmtZ(p0.Z)} F{roughFeed:0.##}");
         }
         plan.Rough.AddRange(profileMoves);
+        // 延伸段进给：G71 内默认 F 已挂，补显式进给字保持一致
+        for (var i = 0; i < roughExtras.Count; i++)
+        {
+            if (!roughExtras[i].Contains(" F"))
+                roughExtras[i] += $" F{roughFeed:0.##}";
+        }
+        plan.Rough.AddRange(roughExtras);
 
-        // ── 精车路径：凸直角拐角插倒角，末点径向外扩时补端部倒角，跨槽安全移动 ──
+        // ── 精车路径：只做收光，不再插入需要吃大料的翻面倒角段 ──
         var curX = p0.X;
         var curZ = p0.Z;
         var m = wps.Count;
