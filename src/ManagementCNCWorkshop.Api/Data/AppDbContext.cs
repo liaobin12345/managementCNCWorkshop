@@ -35,6 +35,12 @@ public class AppDbContext : DbContext
     public DbSet<EquipmentInspection> EquipmentInspections => Set<EquipmentInspection>();
     public DbSet<EquipmentInspectionItem> EquipmentInspectionItems => Set<EquipmentInspectionItem>();
 
+    // ── 编程助手 ──
+    public DbSet<CncProgram> CncPrograms => Set<CncProgram>();
+    public DbSet<CncContourPoint> CncContourPoints => Set<CncContourPoint>();
+    public DbSet<CncMachine> CncMachines => Set<CncMachine>();
+    public DbSet<CncSubscription> CncSubscriptions => Set<CncSubscription>();
+
     /// <summary>
     /// 多租户全局查询过滤器：对实现 <see cref="ITenantScoped"/> 的所有实体，
     /// 自动按当前租户（车间）过滤。未登录（租户为 null）时不过滤（登录/种子/迁移场景）。
@@ -55,6 +61,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ProcessCardStep>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
         modelBuilder.Entity<EquipmentInspection>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
         modelBuilder.Entity<EquipmentInspectionItem>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
+        modelBuilder.Entity<CncProgram>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
+        modelBuilder.Entity<CncContourPoint>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
+        modelBuilder.Entity<CncMachine>().HasQueryFilter(x => !_tenant.HasTenant || x.WorkshopId == _tenant.WorkshopId);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -177,6 +186,50 @@ public class AppDbContext : DbContext
         {
             entity.HasIndex(x => new { x.InspectionId, x.ItemNo });
             entity.HasOne(x => x.Inspection).WithMany(x => x.Items).HasForeignKey(x => x.InspectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── 编程助手 ──
+        modelBuilder.Entity<CncProgram>(entity =>
+        {
+            entity.HasIndex(x => new { x.WorkshopId, x.Status });
+            entity.HasIndex(x => x.CreatedAt);
+            entity.Property(x => x.StockDia).HasPrecision(10, 3);
+            entity.Property(x => x.StockLen).HasPrecision(10, 3);
+            entity.Property(x => x.RoughAllowance).HasPrecision(10, 3);
+            entity.Property(x => x.PerCutDepth).HasPrecision(10, 3);
+            entity.Property(x => x.Feed).HasPrecision(10, 3);
+            entity.Property(x => x.Rpm).HasPrecision(10, 1);
+            entity.Property(x => x.ToolTipR).HasPrecision(10, 3);
+            entity.HasOne(x => x.Creator).WithMany().HasForeignKey(x => x.CreatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId);
+        });
+
+        modelBuilder.Entity<CncContourPoint>(entity =>
+        {
+            entity.HasIndex(x => new { x.CncProgramId, x.Seq }).IsUnique();
+            entity.Property(x => x.X).HasPrecision(10, 3);
+            entity.Property(x => x.Z).HasPrecision(10, 3);
+            entity.Property(x => x.ArcR).HasPrecision(10, 3);
+            entity.Property(x => x.Chamfer).HasPrecision(10, 3);
+            entity.Property(x => x.ThreadPitch).HasPrecision(10, 3);
+            entity.HasOne(x => x.Program).WithMany(x => x.ContourPoints).HasForeignKey(x => x.CncProgramId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CncMachine>(entity =>
+        {
+            entity.HasIndex(x => new { x.WorkshopId, x.Code }).IsUnique();
+            entity.HasIndex(x => x.IsActive);
+            entity.HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId);
+        });
+
+        modelBuilder.Entity<CncSubscription>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeId).IsUnique();
+            entity.HasIndex(x => x.Status);
+            entity.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

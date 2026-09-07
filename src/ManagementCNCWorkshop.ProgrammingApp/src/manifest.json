@@ -1,0 +1,56 @@
+{
+  "name": "数控车编程助手",
+  "appid": "",
+  "description": "拍照/上传图纸 → 轮廓坐标确认 → 生成数控车加工程序",
+  "versionName": "0.1.0",
+  "versionCode": "10",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "splashscreen": {
+      "alwaysShowBeforeRender": true,
+      "waiting": true,
+      "autoclose": true,
+      "delay": 0
+    },
+    "modules": {},
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+          "<uses-permission android:name=\"android.permission.FLASHLIGHT\"/>"
+        ]
+      },
+      "ios": {},
+      "sdkConfigs": {}
+    }
+  },
+  "quickapp": {},
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "minified": true
+    },
+    "usingComponents": true,
+    "permission": {
+      "scope.camera": {
+        "desc": "用于拍摄图纸识别轮廓尺寸"
+      }
+    },
+    "requiredPrivateInfos": []
+  },
+  "mp-alipay": {
+    "usingComponents": true
+  },
+  "h5": {
+    "title": "数控车编程助手",
+    "router": {
+      "mode": "hash",
+      "base": "/prog/"
+    }
+  }
+}

@@ -125,6 +125,8 @@ builder.Services.AddAuthorization();
 // --- 注册服务 ---
 builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddHttpClient<WechatService>();
+builder.Services.AddScoped<ManagementCNCWorkshop.Api.Services.Programming.FanucProgramGenerator>();
+builder.Services.AddScoped<ManagementCNCWorkshop.Api.Services.Programming.DxfContourParser>();
 
 // --- CORS（供 UniApp 和 Web 管理端调用） ---
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -158,6 +160,13 @@ using (var scope = app.Services.CreateScope())
         await EnsureMySqlColumnAsync(connString, "MaintenanceReminders", "CompletedAt", "datetime(6) NULL");
         await EnsureMySqlInspectionTablesAsync(connString);
 
+        // 编程助手：建表（老库 EnsureCreated 不会补新表）
+        await EnsureMySqlProgrammingTablesAsync(connString);
+        await EnsureMySqlColumnAsync(connString, "CncPrograms", "GrooveWidth", "decimal(10,3) NULL");
+        await EnsureMySqlColumnAsync(connString, "CncPrograms", "ChamferC", "decimal(10,3) NULL");
+        await EnsureMySqlColumnAsync(connString, "CncPrograms", "ProcessMode", "varchar(16) NULL");
+        await EnsureMySqlColumnAsync(connString, "CncPrograms", "ToolPost", "varchar(16) NULL");
+
         // 多租户：为历史库补充 WorkshopId 列
         await EnsureMySqlTenantColumnsAsync(connString);
         await EnsureMySqlTenantIndexesAsync(connString);
@@ -180,7 +189,17 @@ using (var scope = app.Services.CreateScope())
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessCardId");
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepNo");
             await EnsureColumnAsync(sqlitePath, "QualityRecords", "ProcessStepName");
+            await EnsureColumnAsync(sqlitePath, "QualityRecords", "EquipmentId");
+            await EnsureColumnAsync(sqlitePath, "MaintenanceReminders", "CompletedById");
+            await EnsureColumnAsync(sqlitePath, "MaintenanceReminders", "CompletedAt");
             await EnsureSqliteInspectionTablesAsync(sqlitePath);
+
+            // 编程助手：建表（老库 EnsureCreated 不会补新表）
+            await EnsureSqliteProgrammingTablesAsync(sqlitePath);
+            await EnsureColumnAsync(sqlitePath, "CncPrograms", "GrooveWidth");
+            await EnsureColumnAsync(sqlitePath, "CncPrograms", "ChamferC");
+            await EnsureColumnAsync(sqlitePath, "CncPrograms", "ProcessMode");
+            await EnsureColumnAsync(sqlitePath, "CncPrograms", "ToolPost");
 
             // 多租户：为历史库补充 WorkshopId 列
             await EnsureSqliteTenantColumnsAsync(sqlitePath);
@@ -814,6 +833,225 @@ CREATE TABLE IF NOT EXISTS EquipmentInspectionItems (
   CONSTRAINT FK_EquipmentInspectionItems_EquipmentInspections_InspectionId FOREIGN KEY (InspectionId) REFERENCES EquipmentInspections (Id) ON DELETE CASCADE
 );
 CREATE INDEX IX_EquipmentInspectionItems_InspectionId_ItemNo ON EquipmentInspectionItems (InspectionId, ItemNo);");
+}
+
+/// <summary>MySQL：补充编程助手表（CncPrograms/CncContourPoints/CncMachines/CncSubscriptions）</summary>
+static async Task EnsureMySqlProgrammingTablesAsync(string mysqlConn)
+{
+    await using var conn = new MySqlConnector.MySqlConnection(mysqlConn);
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" + table + "'";
+        if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  MySQL 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("CncMachines", @"
+CREATE TABLE `CncMachines` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `WorkshopId` int NOT NULL,
+  `Code` varchar(64) NOT NULL,
+  `Name` longtext NOT NULL,
+  `ControlSystem` longtext NOT NULL,
+  `IsActive` tinyint(1) NOT NULL,
+  `NetworkAddress` varchar(255) NULL,
+  `Remark` longtext NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `IX_CncMachines_WorkshopId_Code` (`WorkshopId`,`Code`),
+  KEY `IX_CncMachines_IsActive` (`IsActive`),
+  CONSTRAINT `FK_CncMachines_Workshops_WorkshopId` FOREIGN KEY (`WorkshopId`) REFERENCES `Workshops` (`Id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("CncPrograms", @"
+CREATE TABLE `CncPrograms` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `WorkshopId` int NOT NULL,
+  `PartName` longtext NOT NULL,
+  `DrawingNo` varchar(255) NULL,
+  `Material` varchar(255) NULL,
+  `Datum` varchar(32) NOT NULL,
+  `StockDia` decimal(10,3) NULL,
+  `StockLen` decimal(10,3) NULL,
+  `RoughAllowance` decimal(10,3) NULL,
+  `PerCutDepth` decimal(10,3) NULL,
+  `Feed` decimal(10,3) NULL,
+  `Rpm` decimal(10,1) NULL,
+  `ToolNo` int NULL,
+  `ToolTipR` decimal(10,3) NULL,
+  `TipPos` int NULL,
+  `GrooveWidth` decimal(10,3) NULL,
+  `ProcessMode` varchar(16) NULL,
+  `ControlSystem` varchar(128) NULL,
+  `MachineNo` varchar(64) NULL,
+  `Gcode` longtext NULL,
+  `Source` varchar(16) NOT NULL,
+  `Status` varchar(16) NOT NULL,
+  `Step` int NOT NULL,
+  `CreatedById` int NOT NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  `UpdatedAt` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_CncPrograms_WorkshopId_Status` (`WorkshopId`,`Status`),
+  KEY `IX_CncPrograms_CreatedAt` (`CreatedAt`),
+  CONSTRAINT `FK_CncPrograms_Employees_CreatedById` FOREIGN KEY (`CreatedById`) REFERENCES `Employees` (`Id`) ON DELETE RESTRICT,
+  CONSTRAINT `FK_CncPrograms_Workshops_WorkshopId` FOREIGN KEY (`WorkshopId`) REFERENCES `Workshops` (`Id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("CncContourPoints", @"
+CREATE TABLE `CncContourPoints` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `WorkshopId` int NOT NULL,
+  `CncProgramId` int NOT NULL,
+  `Seq` int NOT NULL,
+  `Type` varchar(16) NOT NULL,
+  `X` decimal(10,3) NOT NULL,
+  `Z` decimal(10,3) NOT NULL,
+  `ArcR` decimal(10,3) NULL,
+  `ArcDir` varchar(8) NULL,
+  `Chamfer` decimal(10,3) NULL,
+  `ThreadPitch` decimal(10,3) NULL,
+  `Note` varchar(255) NULL,
+  `Confidence` decimal(3,2) NULL,
+  `Verified` tinyint(1) NOT NULL,
+  `Manual` tinyint(1) NOT NULL,
+  `Source` varchar(16) NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `IX_CncContourPoints_CncProgramId_Seq` (`CncProgramId`,`Seq`),
+  CONSTRAINT `FK_CncContourPoints_CncPrograms_CncProgramId` FOREIGN KEY (`CncProgramId`) REFERENCES `CncPrograms` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    await CreateTableIfMissingAsync("CncSubscriptions", @"
+CREATE TABLE `CncSubscriptions` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `EmployeeId` int NOT NULL,
+  `PlanCode` varchar(32) NULL,
+  `Status` varchar(16) NOT NULL,
+  `StartDate` datetime(6) NULL,
+  `ExpireDate` datetime(6) NULL,
+  `VisionQuota` int NOT NULL,
+  `VisionUsed` int NOT NULL,
+  `CreatedAt` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `IX_CncSubscriptions_EmployeeId` (`EmployeeId`),
+  KEY `IX_CncSubscriptions_Status` (`Status`),
+  CONSTRAINT `FK_CncSubscriptions_Employees_EmployeeId` FOREIGN KEY (`EmployeeId`) REFERENCES `Employees` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+}
+
+/// <summary>SQLite：补充编程助手表</summary>
+static async Task EnsureSqliteProgrammingTablesAsync(string sqlitePath)
+{
+    await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={sqlitePath}");
+    await conn.OpenAsync();
+
+    async Task CreateTableIfMissingAsync(string table, string ddl)
+    {
+        await using var check = conn.CreateCommand();
+        check.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='" + table + "'";
+        if (await check.ExecuteScalarAsync() is not null) return;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"  SQLite 表 {table} 已补充");
+    }
+
+    await CreateTableIfMissingAsync("CncMachines", @"
+CREATE TABLE IF NOT EXISTS CncMachines (
+  Id INTEGER NOT NULL CONSTRAINT PK_CncMachines PRIMARY KEY AUTOINCREMENT,
+  WorkshopId INTEGER NOT NULL,
+  Code TEXT NOT NULL,
+  Name TEXT NOT NULL,
+  ControlSystem TEXT NOT NULL,
+  IsActive INTEGER NOT NULL,
+  NetworkAddress TEXT NULL,
+  Remark TEXT NULL,
+  CreatedAt TEXT NOT NULL,
+  CONSTRAINT FK_CncMachines_Workshops_WorkshopId FOREIGN KEY (WorkshopId) REFERENCES Workshops (Id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IX_CncMachines_WorkshopId_Code ON CncMachines (WorkshopId, Code);
+CREATE INDEX IX_CncMachines_IsActive ON CncMachines (IsActive);");
+
+    await CreateTableIfMissingAsync("CncPrograms", @"
+CREATE TABLE IF NOT EXISTS CncPrograms (
+  Id INTEGER NOT NULL CONSTRAINT PK_CncPrograms PRIMARY KEY AUTOINCREMENT,
+  WorkshopId INTEGER NOT NULL,
+  PartName TEXT NOT NULL,
+  DrawingNo TEXT NULL,
+  Material TEXT NULL,
+  Datum TEXT NOT NULL,
+  StockDia TEXT NULL,
+  StockLen TEXT NULL,
+  RoughAllowance TEXT NULL,
+  PerCutDepth TEXT NULL,
+  Feed TEXT NULL,
+  Rpm TEXT NULL,
+  ToolNo INTEGER NULL,
+  ToolTipR TEXT NULL,
+  TipPos INTEGER NULL,
+  GrooveWidth TEXT NULL,
+  ProcessMode TEXT NULL,
+  ControlSystem TEXT NULL,
+  MachineNo TEXT NULL,
+  Gcode TEXT NULL,
+  Source TEXT NOT NULL,
+  Status TEXT NOT NULL,
+  Step INTEGER NOT NULL,
+  CreatedById INTEGER NOT NULL,
+  CreatedAt TEXT NOT NULL,
+  UpdatedAt TEXT NOT NULL,
+  CONSTRAINT FK_CncPrograms_Employees_CreatedById FOREIGN KEY (CreatedById) REFERENCES Employees (Id) ON DELETE RESTRICT,
+  CONSTRAINT FK_CncPrograms_Workshops_WorkshopId FOREIGN KEY (WorkshopId) REFERENCES Workshops (Id) ON DELETE RESTRICT
+);
+CREATE INDEX IX_CncPrograms_WorkshopId_Status ON CncPrograms (WorkshopId, Status);
+CREATE INDEX IX_CncPrograms_CreatedAt ON CncPrograms (CreatedAt);");
+
+    await CreateTableIfMissingAsync("CncContourPoints", @"
+CREATE TABLE IF NOT EXISTS CncContourPoints (
+  Id INTEGER NOT NULL CONSTRAINT PK_CncContourPoints PRIMARY KEY AUTOINCREMENT,
+  WorkshopId INTEGER NOT NULL,
+  CncProgramId INTEGER NOT NULL,
+  Seq INTEGER NOT NULL,
+  Type TEXT NOT NULL,
+  X TEXT NOT NULL,
+  Z TEXT NOT NULL,
+  ArcR TEXT NULL,
+  ArcDir TEXT NULL,
+  Chamfer TEXT NULL,
+  ThreadPitch TEXT NULL,
+  Note TEXT NULL,
+  Confidence TEXT NULL,
+  Verified INTEGER NOT NULL,
+  Manual INTEGER NOT NULL,
+  Source TEXT NOT NULL,
+  CONSTRAINT FK_CncContourPoints_CncPrograms_CncProgramId FOREIGN KEY (CncProgramId) REFERENCES CncPrograms (Id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IX_CncContourPoints_CncProgramId_Seq ON CncContourPoints (CncProgramId, Seq);");
+
+    await CreateTableIfMissingAsync("CncSubscriptions", @"
+CREATE TABLE IF NOT EXISTS CncSubscriptions (
+  Id INTEGER NOT NULL CONSTRAINT PK_CncSubscriptions PRIMARY KEY AUTOINCREMENT,
+  EmployeeId INTEGER NOT NULL,
+  PlanCode TEXT NULL,
+  Status TEXT NOT NULL,
+  StartDate TEXT NULL,
+  ExpireDate TEXT NULL,
+  VisionQuota INTEGER NOT NULL,
+  VisionUsed INTEGER NOT NULL,
+  CreatedAt TEXT NOT NULL,
+  CONSTRAINT FK_CncSubscriptions_Employees_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees (Id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IX_CncSubscriptions_EmployeeId ON CncSubscriptions (EmployeeId);
+CREATE INDEX IX_CncSubscriptions_Status ON CncSubscriptions (Status);");
 }
 
 // ─────────────────── 多租户（车间）兼容 ───────────────────
