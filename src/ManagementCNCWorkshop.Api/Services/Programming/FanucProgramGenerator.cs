@@ -295,28 +295,123 @@ public class FanucProgramGenerator
             op++;
         }
 
-        // ── OP5 螺纹 G76 ──
+        // ── OP5+ 螺纹：G92 多刀 → 精车刀去毛刺(倒棱+外圆轻光) → 螺纹刀弹簧刀 ──
         foreach (var t in plan.Threads)
         {
-            sb.AppendLine($"(OP{op} - THREAD G76)");
-            sb.AppendLine($"(THREAD DIA {FmtDia(t.MajorDia)} PITCH {FmtR(t.Pitch)} TO Z{FmtZ(t.EndZ)})");
-            sb.AppendLine($"T{threadTool:D2}{threadTool:D2}");
-            sb.AppendLine($"G97 S{Math.Round(rpm / 2m, 0):0.#} M03");
-            sb.AppendLine($"G00 X{FmtDia(t.MajorDia + 4)} Z{FmtZ(2m)}");
-            var minorDia = t.MajorDia - 1.3m * t.Pitch;
-            var heightUm = (long)Math.Round(0.65m * t.Pitch * 1000m);
-            sb.AppendLine("G76 P010060 Q100 R0.05");
-            sb.AppendLine($"G76 X{FmtDia(minorDia)} Z{FmtZ(t.EndZ)} P{heightUm} Q200 F{t.Pitch:0.###}");
-            sb.AppendLine($"G00 X{FmtDia(faceX)}");
-            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
-            sb.AppendLine();
-            op++;
+            EmitThreadPasses(sb, t, threadTool, rpm, faceX, isTurret, safeZTurret, safeZGang, ref op);
+            EmitThreadDeburr(sb, t, finishTool, finishRpm, finishFeed, faceX, isTurret, safeZTurret, safeZGang, ref op);
+            EmitThreadSpringPass(sb, t, threadTool, rpm, faceX, isTurret, safeZTurret, safeZGang, ref op);
         }
 
         sb.AppendLine("(CHECK: TOOL OFFSETS / CHAMFERS / FIRST ARTICLE SINGLE-BLOCK)");
         foreach (var line in profile.EndBlock.Split('\n'))
             sb.AppendLine(line.Trim());
         return sb.ToString();
+    }
+
+    // ───────────── 螺纹：G92 多刀 + 去毛刺换刀 + 弹簧刀 ─────────────
+
+    /// <summary>G92 分层进刀序列（直径值，从大到小）。首刀吃 ~1.1mm 直径，末两刀微进；刀数 clamp[4,12]。</summary>
+    private static List<decimal> G92PassSchedule(decimal startDia, decimal minorDia)
+    {
+        var total = startDia - minorDia;                 // 需去除的总直径余量
+        if (total <= 0.01m) return new List<decimal> { minorDia };
+        // 递减比例：前几刀占大头，后渐小（近似等切屑）
+        var ratios = new[] { 0.42m, 0.27m, 0.16m, 0.10m, 0.05m };
+        var xs = new List<decimal>();
+        var removed = 0m;
+        var d = startDia;
+        foreach (var r in ratios)
+        {
+            var cut = Math.Round(total * r, 3);
+            if (cut <= 0.005m) continue;
+            d = Math.Round(d - cut, 3);
+            removed += cut;
+            if (d <= minorDia) { d = minorDia; xs.Add(d); removed = total; break; }
+            xs.Add(d);
+        }
+        if (removed < total - 0.005m) xs.Add(minorDia);
+        // clamp 刀数
+        if (xs.Count < 4)
+        {
+            // 余量太小：至少补到 4 刀（均匀退化到末值）
+            while (xs.Count < 4 && xs.Count > 0 && xs[^1] > minorDia - 0.005m)
+                xs.Insert(xs.Count - 1, Math.Round((xs[^2] + xs[^1]) / 2m, 3));
+        }
+        else if (xs.Count > 12)
+        {
+            xs = xs.GetRange(0, 11); xs.Add(minorDia);
+        }
+        if (xs.Count == 0 || xs[^1] != minorDia) xs.Add(minorDia);
+        return xs;
+    }
+
+    /// <summary>螺纹多刀：G92 分层车到牙底（普通螺纹，替代 G76）。</summary>
+    private static void EmitThreadPasses(StringBuilder sb, ThreadOp t, int threadTool, decimal rpm,
+        decimal faceX, bool isTurret, decimal safeZTurret, decimal safeZGang, ref int op)
+    {
+        var preOd = t.MajorDia - ThreadFinishDrop;
+        var minorDia = t.MajorDia - 1.3m * t.Pitch;
+        var startX = t.MajorDia + 0.4m;                  // 高于预牙面留快进余量
+        var pass0 = preOd - 0.5m;                        // 第一刀直径目标（在预牙面下 0.5）
+        var xs = G92PassSchedule(pass0, minorDia);
+
+        sb.AppendLine($"(OP{op} - THREAD G92 MULTI-PASS)");
+        sb.AppendLine($"(THREAD DIA {FmtDia(t.MajorDia)} PITCH {FmtR(t.Pitch)} TO Z{FmtZ(t.EndZ)}  PRE-OD {FmtDia(preOd)})");
+        sb.AppendLine($"T{threadTool:D2}{threadTool:D2}");
+        sb.AppendLine($"G97 S{Math.Round(rpm / 2m, 0):0.#} M03");
+        sb.AppendLine($"G00 X{FmtDia(startX)} Z{FmtZ(2m)}");
+        sb.AppendLine($"G92 X{FmtDia(xs[0])} Z{FmtZ(t.EndZ)} F{t.Pitch:0.###}");
+        for (var i = 1; i < xs.Count; i++)
+            sb.AppendLine($"G92 X{FmtDia(xs[i])}");
+        sb.AppendLine($"G00 X{FmtDia(faceX)}");
+        sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
+        sb.AppendLine();
+        op++;
+    }
+
+    /// <summary>精车刀去螺纹毛刺：螺纹头部棱边倒棱 + 外圆轻光一刀。</summary>
+    private static void EmitThreadDeburr(StringBuilder sb, ThreadOp t, int finishTool, decimal finishRpm,
+        decimal finishFeed, decimal faceX, bool isTurret, decimal safeZTurret, decimal safeZGang, ref int op)
+    {
+        var major = t.MajorDia;                          // 牙尖外径（轻光在此或略高，免削顶）
+        var skimX = major + 0.05m;                       // 外圆轻光：只刮凸出毛刺，不切牙尖
+        var c = 0.8m;                                    // 牙口倒棱量
+        var leadZ = t.EndZ < 0 ? 0m : t.EndZ;            // 牙口侧端面 Z（正面 0；反面镜像到该侧）
+        var dir = t.EndZ < 0 ? -1m : 1m;                 // 由牙口指向螺纹远端
+        var outsideZ = leadZ - dir * 0.5m;               // 端面外侧 0.5（快进落点，工料外）
+        var chamferEndZ = leadZ + dir * c;               // 倒棱终点 Z（吃到牙口内）
+
+        sb.AppendLine($"(OP{op} - THREAD DEBURR (CHAMFER LEAD + OD SKIM))");
+        sb.AppendLine($"T{finishTool:D2}{finishTool:D2}");
+        sb.AppendLine($"G97 S{finishRpm:0.#} M03");
+        // 端面外侧落刀 → 贴面 → 45° 从外圆倒棱进牙口（起刀点在 major 外，避免扎刀）
+        sb.AppendLine($"G00 X{FmtDia(skimX + 2 * c)} Z{FmtZ(outsideZ)}");
+        sb.AppendLine($"G01 Z{FmtZ(leadZ)} F0.1");
+        sb.AppendLine($"G01 X{FmtDia(skimX)} Z{FmtZ(chamferEndZ)} F0.03");   // 45° 牙口倒棱
+        sb.AppendLine($"G01 Z{FmtZ(t.EndZ)} F{finishFeed:0.##}");            // 外圆轻光（只去牙尖毛刺）
+        sb.AppendLine($"G01 X{FmtDia(faceX)}");                              // 径向退
+        sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
+        sb.AppendLine();
+        op++;
+    }
+
+    /// <summary>换回螺纹刀同深再走一刀（spring pass），清毛刺。</summary>
+    private static void EmitThreadSpringPass(StringBuilder sb, ThreadOp t, int threadTool, decimal rpm,
+        decimal faceX, bool isTurret, decimal safeZTurret, decimal safeZGang, ref int op)
+    {
+        var minorDia = t.MajorDia - 1.3m * t.Pitch;
+        var startX = t.MajorDia + 0.4m;
+
+        sb.AppendLine($"(OP{op} - THREAD SPRING PASS (SAME DEPTH))");
+        sb.AppendLine($"T{threadTool:D2}{threadTool:D2}");
+        sb.AppendLine($"G97 S{Math.Round(rpm / 2m, 0):0.#} M03");
+        sb.AppendLine($"G00 X{FmtDia(startX)} Z{FmtZ(2m)}");
+        sb.AppendLine($"G92 X{FmtDia(minorDia)} Z{FmtZ(t.EndZ)} F{t.Pitch:0.###}");
+        sb.AppendLine($"G00 X{FmtDia(faceX)}");
+        sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
+        sb.AppendLine();
+        op++;
     }
 
     // ───────────── 工艺分段 + 路径生成 ─────────────
