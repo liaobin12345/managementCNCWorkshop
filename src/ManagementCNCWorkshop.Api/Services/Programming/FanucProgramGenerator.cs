@@ -25,6 +25,9 @@ public class FanucProgramGenerator
     /// <summary>直径下切判定阈值（直径 mm）</summary>
     private const decimal UndercutEps = 1m;
 
+    /// <summary>螺纹预加工外径 drop：螺纹圆柱不进公称大径，净径降到 M-drop（M24→Ø23.8），粗车/精车同径，G76 在其上挑牙</summary>
+    private static readonly decimal ThreadFinishDrop = 0.20m;
+
     private sealed record Pt(decimal X, decimal Z, decimal? R, string? Dir, bool Marked, bool Hop = false);
 
     private sealed record ThreadOp(decimal MajorDia, decimal Pitch, decimal EndZ);
@@ -183,13 +186,15 @@ public class FanucProgramGenerator
         var finishClearX = prof.Max(x => x.X) + 0.4m;
         var startZ = 2m;
         var faceX = stockDia + 2m;
-        // 刀架类型：turret 刀塔（每次换刀前 Z 须退到 ≥150 安全换刀距离）/ gang 排刀（无换刀动作）
+        var profile = CncPostProfile.Resolve(p.ControlSystem);
+        // 刀架类型：turret 刀塔（每次换刀前 Z 须退到安全换刀距离）/ gang 排刀（无换刀动作）
         var isTurret = !string.Equals(p.ToolPost, "gang", StringComparison.OrdinalIgnoreCase);
-        var safeZ = 150m;
+        var safeZTurret = profile.SafeZTurret;
+        var safeZGang = profile.SafeZGang;
         // 精车快速定位起点：粗车后起始段实际表面（净尺寸+实际余量≈0.2）+ 1mm，不再抬到毛坯面外
         var finishApproachX = prof[0].X + 0.2m + 1m;
         var faceAllowance = 0.1m;
-        var controlSystem = string.IsNullOrWhiteSpace(p.ControlSystem) ? "FANUC" : p.ControlSystem.Trim();
+        var controlSystem = profile.DisplayName;
 
         // 翻面分界延伸仅在"先车侧 + 棒料大于轮廓终点直径"时生效
         var stubDia = sideNo == 1 && stockDia > prof[^1].X + UndercutEps ? stockDia : 0m;
@@ -203,10 +208,11 @@ public class FanucProgramGenerator
             ? "(CUT PARAMS: DEFAULT - PICK MATERIAL FOR OPTIMIZED VC/F)"
             : $"(CUT PARAMS: VC ROUGH {FmtR(mat.VcRough)} FINISH {FmtR(mat.VcFinish)}  F ROUGH {FmtR(roughFeed)} FINISH {FmtR(finishFeed)} FACE {FmtR(faceFeed)} GROOVE {FmtR(grooveFeed)})");
         sb.AppendLine(isTurret
-            ? $"(TOOL POST: TURRET - RETRACT Z{FmtZ(safeZ)} BEFORE EACH TOOL INDEX)"
+            ? $"(TOOL POST: TURRET - RETRACT Z{FmtZ(safeZTurret)} BEFORE EACH TOOL INDEX)"
             : "(TOOL POST: GANG - NO TURRET INDEX)");
         sb.AppendLine("(G71 ROUGH ONLY - FINISH IS POINT-TO-POINT, NO G70)");
-        sb.AppendLine("G99 G40 G21");
+        foreach (var line in profile.InitBlock.Split('\n'))
+            sb.AppendLine(line.Trim());
         sb.AppendLine();
         var op = 1;
 
@@ -236,7 +242,7 @@ public class FanucProgramGenerator
             }
             sb.AppendLine($"G00 X{FmtDia(faceX)}");
             // 后续换刀：刀塔机退到安全换刀距离，排刀机只退 Z10
-            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZ)}" : $"G00 Z{FmtZ(10m)}");
+            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
             sb.AppendLine();
             op++;
         }
@@ -261,7 +267,7 @@ public class FanucProgramGenerator
             sb.AppendLine("G75 R0.3");
             sb.AppendLine($"G75 X{FmtDia(g.ToX)} Z{FmtZ(endP)} P{perPeekUm} Q{qShiftUm} F{grooveFeed:0.##}");
             sb.AppendLine($"G00 X{FmtDia(g.FromX + 2)}");
-            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZ)}" : $"G00 Z{FmtZ(10m)}");
+            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
             sb.AppendLine();
             op++;
         }
@@ -284,7 +290,7 @@ public class FanucProgramGenerator
             sb.AppendLine("G01 U0.1 W-0.5"); // 末端赶毛刺：出刀时斜向赶掉接刀毛刺
             sb.AppendLine($"G00 X{FmtDia(finishClearX)}");
             // 先车侧的边界倒角已并入粗车路径，精车段只收光，不再重复吃大料
-            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZ)}" : $"G00 Z{FmtZ(10m)}");
+            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
             sb.AppendLine();
             op++;
         }
@@ -302,15 +308,14 @@ public class FanucProgramGenerator
             sb.AppendLine("G76 P010060 Q100 R0.05");
             sb.AppendLine($"G76 X{FmtDia(minorDia)} Z{FmtZ(t.EndZ)} P{heightUm} Q200 F{t.Pitch:0.###}");
             sb.AppendLine($"G00 X{FmtDia(faceX)}");
-            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZ)}" : $"G00 Z{FmtZ(10m)}");
+            sb.AppendLine(isTurret ? $"G00 Z{FmtZ(safeZTurret)}" : $"G00 Z{FmtZ(safeZGang)}");
             sb.AppendLine();
             op++;
         }
 
         sb.AppendLine("(CHECK: TOOL OFFSETS / CHAMFERS / FIRST ARTICLE SINGLE-BLOCK)");
-        sb.AppendLine("M05");
-        sb.AppendLine("M30");
-        sb.AppendLine("%");
+        foreach (var line in profile.EndBlock.Split('\n'))
+            sb.AppendLine(line.Trim());
         return sb.ToString();
     }
 
@@ -324,6 +329,35 @@ public class FanucProgramGenerator
 
         var n = prof.Count;
         var p0 = prof[0];
+
+        // ── 螺纹预加工外径(issue#2)：裁螺纹的那段同径圆柱，不得被粗车/精车车到公称 M 再 G76 全深度挑牙。
+        //    把该段的轮廓净径整体降为 (M - ThreadFinishDrop)，于是 G76 从 23.85 预成肩上起牙(牙根仍按 M 计算保持原样)。
+        //    仅作用于实际带螺纹的一侧；其余 ∅ 台阶保持轮廓不变；若降径会与相邻更小扇形肩贴合则放弃(宁可原样不产出坏件)。
+        if (threads.Count > 0)
+        {
+            var eff = new Pt[n];
+            Array.Copy(prof.ToArray(), eff, n);
+            var mapped = false;
+            foreach (var t in threads)
+            {
+                var blankDia = t.MajorDia - ThreadFinishDrop;
+                var lo = -1;
+                for (var i = 0; i < n; i++)
+                    if (Math.Abs(prof[i].X - t.MajorDia) < 0.01m) { lo = i; break; }
+                if (lo < 0) continue;
+                var hi = lo;
+                while (hi + 1 < n && Math.Abs(prof[hi + 1].X - prof[lo].X) < 0.01m) hi++;
+                // 需是一段真实轴向圆柱面(有 Z 向展长)，非孤立点
+                if (Math.Abs(prof[hi].Z - prof[lo].Z) < 0.005m) continue;
+                // 防肩贴合：若 降径后 会低于任一相邻更小∅外圆，则该处台阶消失 → 放弃降径
+                var outsideSmallMax = 0m;
+                if (lo > 0) { var x = prof[lo - 1].X; if (x < t.MajorDia && x > outsideSmallMax) outsideSmallMax = x; }
+                if (hi + 1 < n) { var x = prof[hi + 1].X; if (x < t.MajorDia && x > outsideSmallMax) outsideSmallMax = x; }
+                if (blankDia <= outsideSmallMax) continue;
+                for (var i = lo; i <= hi; i++) { eff[i] = prof[i] with { X = blankDia }; mapped = true; }
+            }
+            if (mapped) prof = eff.ToList();
+        }
 
         // ── G71 粗车轮廓：净形状、跨槽直线连接（不加倒角）。
         //    含窄槽 → 首块带 X+Z（Type II，容忍槽的下切）；纯单调轮廓 → Type I，兼容更老的系统。
@@ -517,6 +551,14 @@ public class FanucProgramGenerator
             }
         }
 
+        // 同轴冗余/分片合并：同一 X 圆柱面上连续 Z 段并成一句，去掉不必要中间点与重复 X
+        var collapsedRough = CollapseCollinear(plan.Rough);
+        plan.Rough.Clear();
+        plan.Rough.AddRange(collapsedRough);
+        var collapsedFinish = CollapseCollinear(plan.Finish);
+        plan.Finish.Clear();
+        plan.Finish.AddRange(collapsedFinish);
+
         // 进给字：倒角段生成时已挂慢速 F0.03，其余切削移动逐行显式挂精车进给（倒角后必须恢复，避免模态沿用慢速）
         for (var i = 2; i < plan.Finish.Count; i++)
         {
@@ -526,6 +568,84 @@ public class FanucProgramGenerator
         }
 
         return plan;
+    }
+
+    /// <summary>同轴冗余坍缩：同一外圆 X 上一串“纯轴向”G01（含显式写了同 X 的 G01 X.. Z..）压成一句最深 Z。
+    /// 仅当坐标真在“同一 X、只沿 Z 走”且非斜/非 R/非慢速——实现依赖解析 X、Z。</summary>
+    private static List<string> CollapseCollinear(List<string> moves)
+    {
+        var result = new List<string>(moves.Count);
+        decimal currentX = 0m;
+        string? pending = null;    // 被清洗段的唯一轴向句
+        decimal pendingZ = 0m;
+
+        void Flush()
+        {
+            if (pending != null) result.Add(pending);
+            pending = null;
+        }
+
+        foreach (var l in moves)
+        {
+            var special = l.Contains(" R") || l.Contains(" F0") || !l.StartsWith("G01")
+                          || l.StartsWith("G00") || l.StartsWith("G02") || l.StartsWith("G03");
+            if (special)
+            {
+                Flush();
+                var x = ParseCoord(l, 'X');
+                if (x.HasValue) currentX = x.Value;
+                result.Add(l);
+                continue;
+            }
+
+            var X = ParseCoord(l, 'X');
+            var Z = ParseCoord(l, 'Z');
+
+            if (!X.HasValue && Z.HasValue)
+            {
+                // 纯轴向：G01 Z..（沿 currentX）→ 并入最深
+                if (pending == null || Math.Abs(Z.Value) > Math.Abs(pendingZ))
+                { pending = $"G01 Z{FmtZ(Z.Value)}"; pendingZ = Z.Value; }
+                continue;
+            }
+
+            if (X.HasValue && !Z.HasValue)
+            {
+                Flush();
+                currentX = X.Value;
+                result.Add(l);
+                continue;
+            }
+
+            if (X.HasValue && Z.HasValue)
+            {
+                if (Math.Abs(X.Value - currentX) < 0.0001m)
+                {
+                    // 显式 X 与当前外圆相同 = 冗余 X 的轴向续行 → 并入最深
+                    if (pending == null || Math.Abs(Z.Value) > Math.Abs(pendingZ))
+                    { pending = $"G01 Z{FmtZ(Z.Value)}"; pendingZ = Z.Value; }
+                    continue;
+                }
+                Flush();
+                currentX = X.Value;
+                result.Add(l);
+                continue;
+            }
+            result.Add(l); // 无 X 无 Z（如注释/兼容）
+        }
+        Flush();
+        return result;
+    }
+
+    private static decimal? ParseCoord(string l, char c)
+    {
+        var i = l.IndexOf($" {c}");
+        if (i < 0) return null;
+        var j = i + 2;
+        var k = j;
+        while (k < l.Length && (char.IsDigit(l[k]) || l[k] == '-' || l[k] == '.')) k++;
+        return decimal.TryParse(l.Substring(j, k - j), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : null;
     }
 
     private static string Ln(decimal fx, decimal fz, decimal tx, decimal tz) =>
