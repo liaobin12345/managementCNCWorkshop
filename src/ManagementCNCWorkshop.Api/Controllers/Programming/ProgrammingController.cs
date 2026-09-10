@@ -28,6 +28,24 @@ public class ProgrammingController(AppDbContext db, TenantContext tenant, FanucP
     /// <summary>当前有效车间 ID（Admin 跨车间时为 null）</summary>
     private int? WorkshopId => tenant.HasTenant ? tenant.WorkshopId : null;
 
+    // ─────────────────────────── 后处理配置 ───────────────────────────
+
+    /// <summary>后处理配置列表（供前端选择目标数控系统）</summary>
+    [HttpGet("post-profiles")]
+    public IActionResult ListPostProfiles()
+    {
+        var list = CncPostProfile.All.Select(p => new
+        {
+            key = p.Key,
+            displayName = p.DisplayName,
+            initBlock = p.InitBlock,
+            endBlock = p.EndBlock,
+            safeZTurret = p.SafeZTurret,
+            safeZGang = p.SafeZGang,
+        }).ToList();
+        return Ok(list);
+    }
+
     // ─────────────────────────── 材料库 ───────────────────────────
 
     /// <summary>常用材料列表（含行业经验推荐切削参数，供前端下拉选择与参数预览）</summary>

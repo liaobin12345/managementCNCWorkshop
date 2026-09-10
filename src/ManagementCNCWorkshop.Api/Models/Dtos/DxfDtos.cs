@@ -10,5 +10,6 @@ public class DxfParseResponse
 {
     public bool Success { get; set; }
     public string? Message { get; set; }
+    public List<string> Warnings { get; set; } = new();
     public List<CncContourPointDto> Points { get; set; } = new();
 }

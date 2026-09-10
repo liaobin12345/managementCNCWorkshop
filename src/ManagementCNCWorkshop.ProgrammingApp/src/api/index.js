@@ -12,7 +12,8 @@ export const apiCreateMachine = (data) => post('/programming/machines', data)
 export const apiUpdateMachine = (id, data) => put(`/programming/machines/${id}`, data)
 export const apiDeleteMachine = (id) => del(`/programming/machines/${id}`)
 
-// ── 材料库（含推荐切削参数） ──
+// ── 后处理配置 / 材料库 ──
+export const apiPostProfiles = () => get('/programming/post-profiles')
 export const apiMaterials = () => get('/programming/materials')
 
 // ── 程序 ──

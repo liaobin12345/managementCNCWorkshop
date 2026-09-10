@@ -155,7 +155,17 @@
           </view>
           <view class="field">
             <text class="field-label">目标数控系统</text>
-            <input class="field-input" v-model="params.controlSystem" placeholder="如：Fanuc 0i-TF" />
+            <picker v-if="postProfiles.length" :range="postProfileNames" :value="postProfileIdx" @change="onPostProfilePick">
+              <view class="field-picker">{{ params.controlSystem || '选择数控系统' }}<text class="ph">▾</text></view>
+            </picker>
+            <input v-else class="field-input" v-model="params.controlSystem" placeholder="如：Fanuc 0i-TF" />
+            <view v-if="pickedPostProfile" class="mat-params">
+              <view class="mat-param-row"><text>初始化 {{ pickedPostProfile.initBlock }} · 结束 {{ pickedPostProfile.endBlock.replace(/\n/g, ' ') }}</text></view>
+              <view class="mat-param-row"><text>刀塔换刀 Z{{ pickedPostProfile.safeZTurret }} · 排刀 Z{{ pickedPostProfile.safeZGang }}</text></view>
+            </view>
+            <view v-if="postProfileCustom" class="field" style="margin-top: 12rpx">
+              <input class="field-input" v-model="params.controlSystem" placeholder="手输系统型号，如 Mitsubishi M70" />
+            </view>
           </view>
           <view class="field-row">
             <view class="field half">
@@ -306,6 +316,7 @@ import {
   apiGenerateProgram,
   apiParseDxf,
   apiMaterials,
+  apiPostProfiles,
 } from '../../api/index'
 
 const STEPS = ['图纸', '坐标', '参数', '生成', '导出']
@@ -327,6 +338,8 @@ export default {
       dxfPreviewImage: '',
       datumIdx: 0,
       materialList: [],
+      postProfiles: [],
+      postProfileCustom: false,
       form: { partName: '', drawingNo: '', material: '', datum: 'right_face' },
       points: [
         { type: 'face', x: '', z: '0', note: '端面' },
@@ -359,6 +372,7 @@ export default {
     const info = uni.getSystemInfoSync()
     this.statusBarHeight = info.statusBarHeight || 20
     this.loadMaterials()
+    this.loadPostProfiles()
   },
   computed: {
     materialNames() {
@@ -367,6 +381,16 @@ export default {
     pickedMaterial() {
       return this.materialList.find((m) => m.name === this.form.material) || null
     },
+    postProfileNames() {
+      return [...this.postProfiles.map((p) => p.displayName), '其他（手输）']
+    },
+    postProfileIdx() {
+      const idx = this.postProfiles.findIndex((p) => p.displayName === this.params.controlSystem)
+      return idx >= 0 ? idx : this.postProfiles.length
+    },
+    pickedPostProfile() {
+      return this.postProfiles.find((p) => p.displayName === this.params.controlSystem) || null
+    },
   },
   methods: {
     async loadMaterials() {
@@ -374,6 +398,24 @@ export default {
         this.materialList = await apiMaterials()
       } catch (e) {
         this.materialList = []
+      }
+    },
+    async loadPostProfiles() {
+      try {
+        const list = await apiPostProfiles()
+        this.postProfiles = Array.isArray(list) ? list : []
+      } catch (e) {
+        this.postProfiles = []
+      }
+    },
+    onPostProfilePick(e) {
+      const idx = +e.detail.value
+      if (idx < this.postProfiles.length) {
+        this.params.controlSystem = this.postProfiles[idx].displayName
+        this.postProfileCustom = false
+      } else {
+        this.postProfileCustom = true
+        this.params.controlSystem = ''
       }
     },
     onMaterialPick(e) {
@@ -478,9 +520,11 @@ export default {
             }))
             this.points = this.dxfPoints.map((p) => ({ ...p }))
             this.pointCount = this.points.length
-            this.dxfMsg = `DXF 解析成功：${this.points.length} 个轮廓点，请核对坐标后继续`
+            const warns = Array.isArray(parsed.warnings) && parsed.warnings.length
+              ? parsed.warnings.join('；') : ''
+            this.dxfMsg = `解析成功 ${this.points.length} 点` + (warns ? `：⚠ ${warns}` : '，请核对坐标后继续')
             this.dxfPreviewImage = this.buildDxfPreviewDataUrl(this.dxfPoints)
-            uni.showToast({ title: 'DXF 已解析', icon: 'success' })
+            uni.showToast({ title: warns ? '已解析（有告警）' : 'DXF 已解析', icon: 'none' })
           } else {
             this.dxfMsg = (parsed && parsed.message) || 'DXF 解析失败，请确认图纸为单外轮廓'
             this.dxfPreviewImage = ''
